@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#17212d">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'self' https://alliance.yunzhanxinxi.com; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'"
+    >
+    <title>CPS 数据驾驶舱</title>
+    <meta name="description" content="小红书与企业微信 CPS 渠道推广位数据看板">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div id="app" aria-live="polite">
+      <main class="login-shell">
+        <section class="login-card">
+          <div class="login-visual" aria-hidden="true">
+            <div class="login-grid"></div>
+            <div class="login-chart">
+              <i style="height:25%"></i><i style="height:46%"></i>
+              <i style="height:38%"></i><i style="height:72%"></i>
+              <i style="height:58%"></i><i style="height:88%"></i>
+            </div>
+            <div class="login-orbit one"></div><div class="login-orbit two"></div>
+          </div>
+          <div class="login-form-wrap">
+            <div class="login-brand"><span>CPS</span><b>数据驾驶舱</b></div>
+            <p class="login-kicker">内部数据看板</p>
+            <h1>输入访问密码</h1>
+            <p class="login-description">该看板仅供团队内部使用。请输入共享密码继续查看实时渠道数据。</p>
+            <form id="passwordForm">
+              <label for="dashboard-password">访问密码</label>
+              <div class="password-field" id="passwordField">
+                <span aria-hidden="true">●</span>
+                <input
+                  id="dashboard-password"
+                  type="password"
+                  autocomplete="current-password"
+                  placeholder="请输入密码"
+                  required
+                  autofocus
+                >
+              </div>
+              <div class="login-error hidden" id="loginError"></div>
+              <button type="submit" id="loginButton">
+                <span class="button-label">进入数据看板</span><span aria-hidden="true">→</span>
+              </button>
+            </form>
+            <small class="login-note"><i></i> 验证成功后，本设备 30 天内无需重复输入</small>
+          </div>
+        </section>
+      </main>
+    </div>
+    <noscript>请启用 JavaScript 后查看数据看板。</noscript>
+  </body>
+</html>
