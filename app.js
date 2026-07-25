@@ -698,7 +698,7 @@
     if (!list || !count || !reconcileBox) return;
     const allSources = state.data?.sources || [];
     const successful = allSources.filter((source) => source.status === "ok").length;
-    count.textContent = `${successful}/${allSources.length || 12} 数据源正常`;
+    count.textContent = `${successful}/${allSources.length || state.config?.sources?.length || 14} 数据源正常`;
     const { visible, current } = dashboardMetrics();
     list.innerHTML = allSources.filter((source) => source.kind === "channel").map((source) => {
       const metrics = metricsFor(source, state.period);
