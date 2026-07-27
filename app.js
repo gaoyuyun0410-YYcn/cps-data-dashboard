@@ -329,7 +329,7 @@
               <thead>
                 <tr>
                   <th>排名</th><th>渠道 / 推广位</th><th>有效订单</th><th>成交金额</th>
-                  <th>预估佣金</th><th>客单价</th><th>订单贡献</th><th>状态</th><th>原始看板</th>
+                  <th>预估佣金</th><th>客单价</th><th>订单贡献</th><th>增长趋势</th><th>数据详情</th>
                 </tr>
               </thead>
               <tbody id="rankingBody"></tbody>
@@ -388,6 +388,10 @@
     });
     document.getElementById("refreshButton")?.addEventListener("click", () => {
       void refreshData();
+    });
+    document.getElementById("rankingBody")?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-detail-id]");
+      if (button) openPromotionDetail(button.dataset.detailId);
     });
   }
 
@@ -752,6 +756,137 @@
         right.metrics.orders - left.metrics.orders || right.metrics.gmv - left.metrics.gmv);
   }
 
+  function growthPresentation(current, previous) {
+    if (!previous && !current) {
+      return { tone: "flat", value: "—", note: "近 14 天暂无订单" };
+    }
+    if (!previous) {
+      return { tone: "new", value: "新增", note: `近 7 天 ${integer(current)} 单` };
+    }
+    const change = ratio(current, previous) || 0;
+    return {
+      tone: change > 0 ? "up" : change < 0 ? "down" : "flat",
+      value: `${change > 0 ? "↑" : change < 0 ? "↓" : ""} ${Math.abs(change).toFixed(1)}%`.trim(),
+      note: `${integer(current)} 单 vs ${integer(previous)} 单`,
+    };
+  }
+
+  function growthCell(current, previous) {
+    const growth = growthPresentation(current, previous);
+    return `
+      <div class="growth-cell ${growth.tone}">
+        <strong>${growth.value}</strong>
+        <small>${growth.note}</small>
+      </div>
+    `;
+  }
+
+  function detailPeriodLabel() {
+    if (state.period === "all") return "累计概览 · 每日明细展示近 30 天";
+    return `${periodOptions.find(([key]) => key === state.period)?.[1] || "当前周期"}明细`;
+  }
+
+  function closePromotionDetail() {
+    const overlay = document.getElementById("promotionDetail");
+    if (!overlay) return;
+    document.body.classList.remove("modal-open");
+    overlay.remove();
+  }
+
+  function openPromotionDetail(sourceId) {
+    closePromotionDetail();
+    const source = (state.data?.sources || []).find(
+      (item) => item.id === sourceId && item.kind === "promotion",
+    );
+    if (!source) return;
+    const metrics = metricsFor(source, state.period);
+    const current7 = metricsFor(source, "7d");
+    const previous7 = metricsFor(source, "7d", 7);
+    const growth = growthPresentation(current7.orders, previous7.orders);
+    const days = state.period === "today" ? 1 : state.period === "7d" ? 7 : 30;
+    const daily = [...source.daily]
+      .sort((left, right) => right.date.localeCompare(left.date))
+      .slice(0, days);
+    const dailyRows = daily.length
+      ? daily.map((row, index) => {
+        const previous = daily[index + 1];
+        const dailyChange = previous ? ratio(row.orders, previous.orders) : null;
+        const changeText = dailyChange === null
+          ? "—"
+          : `${dailyChange > 0 ? "↑" : dailyChange < 0 ? "↓" : ""} ${Math.abs(dailyChange).toFixed(1)}%`.trim();
+        const changeTone = dailyChange > 0 ? "up" : dailyChange < 0 ? "down" : "flat";
+        return `
+          <tr>
+            <td>${escapeHtml(row.date)}</td>
+            <td><b>${integer(row.orders)}</b></td>
+            <td>¥ ${money(row.gmv)}</td>
+            <td>¥ ${money(row.commission)}</td>
+            <td>¥ ${row.orders ? money(row.gmv / row.orders) : "0.00"}</td>
+            <td><span class="daily-change ${changeTone}">${changeText}</span></td>
+          </tr>
+        `;
+      }).join("")
+      : '<tr><td colspan="6"><div class="detail-empty">当前周期暂无每日明细</div></td></tr>';
+    const overlay = document.createElement("div");
+    overlay.id = "promotionDetail";
+    overlay.className = "detail-overlay";
+    overlay.innerHTML = `
+      <section class="detail-dialog" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+        <header class="detail-head">
+          <div class="detail-identity">
+            <span class="${source.channel === "小红书" ? "xhs-bg" : "wecom-bg"}">${source.channel === "小红书" ? "小" : "企"}</span>
+            <div>
+              <p>${escapeHtml(source.channel)} · ${detailPeriodLabel()}</p>
+              <h2 id="detailTitle">${escapeHtml(source.promotion)}</h2>
+            </div>
+          </div>
+          <button class="detail-close" type="button" aria-label="关闭详细数据">×</button>
+        </header>
+        <div class="detail-summary">
+          <article><span>有效订单</span><strong>${integer(metrics.orders)} 笔</strong></article>
+          <article><span>成交金额</span><strong>¥ ${money(metrics.gmv)}</strong></article>
+          <article><span>预估佣金</span><strong>¥ ${money(metrics.commission)}</strong></article>
+          <article><span>平均客单价</span><strong>¥ ${metrics.orders ? money(metrics.gmv / metrics.orders) : "0.00"}</strong></article>
+        </div>
+        <div class="detail-growth">
+          <div>
+            <span>近 7 天增长趋势</span>
+            <strong class="${growth.tone}">${growth.value}</strong>
+          </div>
+          <small>${growth.note} · 对比前 7 天</small>
+        </div>
+        <div class="detail-table-wrap">
+          <table class="detail-table">
+            <thead>
+              <tr><th>日期</th><th>有效订单</th><th>成交金额</th><th>预估佣金</th><th>客单价</th><th>日环比</th></tr>
+            </thead>
+            <tbody>${dailyRows}</tbody>
+          </table>
+        </div>
+        <footer class="detail-actions">
+          <span>每日数据按日期从新到旧排列</span>
+          <a href="${escapeHtml(safeExternalUrl(source.shortUrl))}" target="_blank" rel="noopener noreferrer">打开原始看板 ↗</a>
+        </footer>
+      </section>
+    `;
+    document.body.appendChild(overlay);
+    document.body.classList.add("modal-open");
+    const onEscape = (event) => {
+      if (event.key === "Escape") dismiss();
+    };
+    const dismiss = () => {
+      document.removeEventListener("keydown", onEscape);
+      closePromotionDetail();
+    };
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay || event.target.closest(".detail-close")) {
+        dismiss();
+      }
+    });
+    document.addEventListener("keydown", onEscape);
+    overlay.querySelector(".detail-close")?.focus();
+  }
+
   function renderRanking() {
     const body = document.getElementById("rankingBody");
     if (!body) return;
@@ -761,10 +896,8 @@
       return;
     }
     body.innerHTML = rows.map((row, index) => {
-      const status = row.metrics.orders === 0
-        ? "待启动"
-        : row.trend !== null && row.trend > 0 ? "增长中" : "有转化";
-      const statusClass = status === "增长中" ? "growth" : status === "待启动" ? "idle" : "active";
+      const current7 = metricsFor(row, "7d").orders;
+      const previous7 = metricsFor(row, "7d", 7).orders;
       return `
         <tr>
           <td><span class="rank-number rank-${index + 1}">${String(index + 1).padStart(2, "0")}</span></td>
@@ -781,8 +914,8 @@
           <td>
             <div class="share-cell"><span>${row.share.toFixed(1)}%</span><i><em style="width:${Math.min(row.share, 100)}%"></em></i></div>
           </td>
-          <td><span class="status-pill ${statusClass}">${status}</span></td>
-          <td><a href="${escapeHtml(safeExternalUrl(row.shortUrl))}" target="_blank" rel="noopener noreferrer">查看 ↗</a></td>
+          <td>${growthCell(current7, previous7)}</td>
+          <td><button class="detail-trigger" type="button" data-detail-id="${escapeHtml(row.id)}">查看详情</button></td>
         </tr>
       `;
     }).join("");
