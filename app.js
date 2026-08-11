@@ -284,6 +284,19 @@
         <div class="error-banner hidden" id="errorBanner"></div>
         <section class="kpi-grid" id="kpiGrid" aria-label="核心指标"></section>
 
+        <section class="panel yesterday-panel" aria-labelledby="yesterdayTitle">
+          <div class="yesterday-head">
+            <div>
+              <p class="panel-kicker">完整自然日复盘</p>
+              <h2 id="yesterdayTitle">昨日对比</h2>
+              <p class="yesterday-range" id="yesterdayRange">正在读取昨日数据</p>
+            </div>
+            <span class="yesterday-badge">不含今日</span>
+          </div>
+          <div class="yesterday-grid" id="yesterdayGrid" aria-label="昨日与前日指标对比"></div>
+          <div class="yesterday-insight" id="yesterdayInsight"></div>
+        </section>
+
         <section class="main-grid">
           <article class="panel trend-panel">
             <div class="panel-head">
@@ -605,6 +618,7 @@
   function renderAll() {
     renderError();
     renderKpis();
+    renderYesterdayComparison();
     renderTrend();
     renderChannels();
     renderRanking();
@@ -643,6 +657,109 @@
         </article>
       `;
     }).join("");
+  }
+
+  function shanghaiDateKey(offsetDays = 0) {
+    const target = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
+    const parts = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(target);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+  }
+
+  function shortDateLabel(dateKey) {
+    const [, month, day] = dateKey.split("-");
+    return `${month}月${day}日`;
+  }
+
+  function metricsOnDate(source, dateKey) {
+    const row = source.daily.find((item) => item.date === dateKey);
+    return row ? { orders: row.orders, commission: row.commission, gmv: row.gmv } : null;
+  }
+
+  function comparisonDay(sources, dateKey) {
+    return sources.reduce((result, source) => {
+      const metrics = metricsOnDate(source, dateKey);
+      if (metrics) {
+        addMetrics(result.metrics, metrics);
+        result.available += 1;
+      }
+      return result;
+    }, { metrics: zeroMetrics(), available: 0 });
+  }
+
+  function comparisonValue(current, previous) {
+    const change = ratio(current, previous);
+    if (change === null) return { tone: "new", label: "新增" };
+    if (change === 0) return { tone: "flat", label: "持平" };
+    return {
+      tone: change > 0 ? "up" : "down",
+      label: `${change > 0 ? "↑" : "↓"} ${Math.abs(change).toFixed(1)}%`,
+    };
+  }
+
+  function renderYesterdayComparison() {
+    const grid = document.getElementById("yesterdayGrid");
+    const range = document.getElementById("yesterdayRange");
+    const insight = document.getElementById("yesterdayInsight");
+    if (!grid || !range || !insight) return;
+
+    const totalSources = selectedSources().filter((source) => source.kind === "channel");
+    const yesterdayKey = shanghaiDateKey(-1);
+    const previousKey = shanghaiDateKey(-2);
+    const yesterday = comparisonDay(totalSources, yesterdayKey);
+    const previous = comparisonDay(totalSources, previousKey);
+    const complete = totalSources.length > 0
+      && yesterday.available === totalSources.length
+      && previous.available === totalSources.length;
+
+    range.textContent = `${shortDateLabel(yesterdayKey)}（昨日） 对比 ${shortDateLabel(previousKey)}（前日）`;
+
+    if (!state.data || !totalSources.length) {
+      grid.innerHTML = '<div class="yesterday-empty">正在同步完整自然日数据…</div>';
+      insight.innerHTML = '<span class="comparison-dot"></span><p>昨日数据同步完成后将自动显示</p>';
+      return;
+    }
+
+    const yesterdayAov = yesterday.metrics.orders
+      ? yesterday.metrics.gmv / yesterday.metrics.orders
+      : 0;
+    const previousAov = previous.metrics.orders
+      ? previous.metrics.gmv / previous.metrics.orders
+      : 0;
+    const items = [
+      ["有效订单", `${integer(yesterday.metrics.orders)} 笔`, `${integer(previous.metrics.orders)} 笔`, yesterday.metrics.orders, previous.metrics.orders, "orders"],
+      ["成交金额", `¥ ${money(yesterday.metrics.gmv)}`, `¥ ${money(previous.metrics.gmv)}`, yesterday.metrics.gmv, previous.metrics.gmv, "gmv"],
+      ["预估佣金", `¥ ${money(yesterday.metrics.commission)}`, `¥ ${money(previous.metrics.commission)}`, yesterday.metrics.commission, previous.metrics.commission, "commission"],
+      ["平均客单价", `¥ ${money(yesterdayAov)}`, `¥ ${money(previousAov)}`, yesterdayAov, previousAov, "aov"],
+    ];
+
+    grid.innerHTML = items.map(([label, value, previousValue, currentRaw, previousRaw, tone]) => {
+      const change = comparisonValue(currentRaw, previousRaw);
+      return `
+        <article class="yesterday-card ${tone}">
+          <div class="yesterday-card-top">
+            <span>${label}</span>
+            <strong class="comparison-pill ${change.tone}">${change.label}</strong>
+          </div>
+          <b>${value}</b>
+          <small>前日 ${previousValue}</small>
+        </article>
+      `;
+    }).join("");
+
+    const orderChange = comparisonValue(yesterday.metrics.orders, previous.metrics.orders);
+    const gmvChange = comparisonValue(yesterday.metrics.gmv, previous.metrics.gmv);
+    insight.className = `yesterday-insight ${complete ? "complete" : "partial"}`;
+    insight.innerHTML = `
+      <span class="comparison-dot"></span>
+      <p><strong>昨日经营速览：</strong>订单${orderChange.label}，成交金额${gmvChange.label}。</p>
+      <small>${complete ? "数据口径完整" : `数据待补齐（${Math.min(yesterday.available, previous.available)}/${totalSources.length} 个渠道）`} · 仅比较两个已结束的完整自然日</small>
+    `;
   }
 
   function renderTrend() {
