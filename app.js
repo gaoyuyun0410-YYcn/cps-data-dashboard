@@ -284,19 +284,6 @@
         <div class="error-banner hidden" id="errorBanner"></div>
         <section class="kpi-grid" id="kpiGrid" aria-label="核心指标"></section>
 
-        <section class="panel yesterday-panel" aria-labelledby="yesterdayTitle">
-          <div class="yesterday-head">
-            <div>
-              <p class="panel-kicker">完整自然日复盘</p>
-              <h2 id="yesterdayTitle">昨日对比</h2>
-              <p class="yesterday-range" id="yesterdayRange">正在读取昨日数据</p>
-            </div>
-            <span class="yesterday-badge">不含今日</span>
-          </div>
-          <div class="yesterday-grid" id="yesterdayGrid" aria-label="昨日与前日指标对比"></div>
-          <div class="yesterday-insight" id="yesterdayInsight"></div>
-        </section>
-
         <section class="main-grid">
           <article class="panel trend-panel">
             <div class="panel-head">
@@ -348,6 +335,34 @@
               <tbody id="rankingBody"></tbody>
             </table>
           </div>
+        </section>
+
+        <section class="reference-grid" aria-label="经营参考数据">
+          <article class="panel monthly-panel" aria-labelledby="monthlyTitle">
+            <div class="monthly-head">
+              <div>
+                <p class="panel-kicker">月度经营复盘</p>
+                <h2 id="monthlyTitle">本月与上月</h2>
+                <p class="monthly-range" id="monthlyRange">正在读取月度数据</p>
+              </div>
+              <span class="monthly-badge" id="monthlyBadge">统计中</span>
+            </div>
+            <div class="monthly-grid" id="monthlyGrid" aria-label="本月与上月指标"></div>
+            <div class="monthly-note" id="monthlyNote"></div>
+          </article>
+
+          <aside class="panel yesterday-panel" aria-labelledby="yesterdayTitle">
+            <div class="yesterday-head">
+              <div>
+                <p class="panel-kicker">日度参考</p>
+                <h2 id="yesterdayTitle">昨日对比</h2>
+                <p class="yesterday-range" id="yesterdayRange">正在读取昨日数据</p>
+              </div>
+              <span class="yesterday-badge">不含今日</span>
+            </div>
+            <div class="yesterday-grid" id="yesterdayGrid" aria-label="昨日与前日指标对比"></div>
+            <div class="yesterday-insight" id="yesterdayInsight"></div>
+          </aside>
         </section>
 
         <footer>
@@ -618,10 +633,11 @@
   function renderAll() {
     renderError();
     renderKpis();
-    renderYesterdayComparison();
     renderTrend();
     renderChannels();
     renderRanking();
+    renderMonthlyComparison();
+    renderYesterdayComparison();
     setSyncState();
   }
 
@@ -676,6 +692,38 @@
     return `${month}月${day}日`;
   }
 
+  function monthContext() {
+    const [year, month] = shanghaiDateKey().split("-").map(Number);
+    const currentStart = `${year}-${String(month).padStart(2, "0")}-01`;
+    const previousDate = new Date(Date.UTC(year, month - 2, 1));
+    const previousYear = previousDate.getUTCFullYear();
+    const previousMonth = previousDate.getUTCMonth() + 1;
+    const previousStart = `${previousYear}-${String(previousMonth).padStart(2, "0")}-01`;
+    const previousEndDay = new Date(Date.UTC(year, month - 1, 0)).getUTCDate();
+    const previousEnd = `${previousYear}-${String(previousMonth).padStart(2, "0")}-${String(previousEndDay).padStart(2, "0")}`;
+    return {
+      currentStart,
+      currentEnd: shanghaiDateKey(-1),
+      previousStart,
+      previousEnd,
+      currentLabel: `${month}月`,
+      previousLabel: `${previousMonth}月`,
+    };
+  }
+
+  function metricsBetween(sources, start, end) {
+    return sources.reduce((total, source) => source.daily
+      .filter((row) => row.date >= start && row.date <= end)
+      .reduce((sum, row) => addMetrics(sum, row), total), zeroMetrics());
+  }
+
+  function availableDateRange(sources, start, end) {
+    const dates = sources.flatMap((source) => source.daily.map((row) => row.date))
+      .filter((date) => date >= start && date <= end)
+      .sort();
+    return dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null;
+  }
+
   function metricsOnDate(source, dateKey) {
     const row = source.daily.find((item) => item.date === dateKey);
     return row ? { orders: row.orders, commission: row.commission, gmv: row.gmv } : null;
@@ -700,6 +748,58 @@
       tone: change > 0 ? "up" : "down",
       label: `${change > 0 ? "↑" : "↓"} ${Math.abs(change).toFixed(1)}%`,
     };
+  }
+
+  function renderMonthlyComparison() {
+    const grid = document.getElementById("monthlyGrid");
+    const range = document.getElementById("monthlyRange");
+    const badge = document.getElementById("monthlyBadge");
+    const note = document.getElementById("monthlyNote");
+    if (!grid || !range || !badge || !note) return;
+
+    const totalSources = selectedSources().filter((source) => source.kind === "channel");
+    const month = monthContext();
+    const current = metricsBetween(totalSources, month.currentStart, month.currentEnd);
+    const previous = metricsBetween(totalSources, month.previousStart, month.previousEnd);
+    const previousRange = availableDateRange(totalSources, month.previousStart, month.previousEnd);
+    const previousComplete = Boolean(previousRange?.start === month.previousStart && previousRange?.end === month.previousEnd);
+    const currentAov = current.orders ? current.gmv / current.orders : 0;
+    const previousAov = previous.orders ? previous.gmv / previous.orders : 0;
+
+    range.textContent = `${month.currentLabel}截至${shortDateLabel(month.currentEnd)} · ${month.previousLabel}${previousComplete ? "完整月" : "当前可见部分"}`;
+    badge.textContent = previousComplete ? "可比口径" : "上月数据部分可见";
+    badge.classList.toggle("partial", !previousComplete);
+
+    if (!state.data || !totalSources.length) {
+      grid.innerHTML = '<div class="monthly-empty">正在同步月度数据…</div>';
+      note.textContent = "月度数据同步完成后将自动显示";
+      return;
+    }
+
+    const items = [
+      ["有效订单", `${integer(current.orders)} 笔`, `${integer(previous.orders)} 笔`, current.orders, previous.orders, "orders"],
+      ["成交金额", `¥ ${money(current.gmv)}`, `¥ ${money(previous.gmv)}`, current.gmv, previous.gmv, "gmv"],
+      ["预估佣金", `¥ ${money(current.commission)}`, `¥ ${money(previous.commission)}`, current.commission, previous.commission, "commission"],
+      ["平均客单价", `¥ ${money(currentAov)}`, `¥ ${money(previousAov)}`, currentAov, previousAov, "aov"],
+    ];
+
+    grid.innerHTML = items.map(([label, currentValue, previousValue, currentRaw, previousRaw, tone]) => {
+      const change = previousComplete ? comparisonValue(currentRaw, previousRaw) : null;
+      return `
+        <article class="monthly-card ${tone}">
+          <span>${label}</span>
+          <div class="month-value"><small>${month.currentLabel}</small><b>${currentValue}</b></div>
+          <div class="month-previous">
+            <span>${month.previousLabel}${previousComplete ? "" : "可见"} ${previousValue}</span>
+            ${change ? `<strong class="comparison-pill ${change.tone}">${change.label}</strong>` : '<em>暂不计算月环比</em>'}
+          </div>
+        </article>
+      `;
+    }).join("");
+
+    note.innerHTML = previousComplete
+      ? `<strong>月份口径完整：</strong>${month.currentLabel}截至昨日，对比${month.previousLabel}完整月。`
+      : `<strong>数据范围说明：</strong>公开接口仅保留近 30 天，${month.previousLabel}目前可见 ${previousRange ? `${shortDateLabel(previousRange.start)}—${shortDateLabel(previousRange.end)}` : "暂无记录"}；为避免误导，暂不展示月环比。`;
   }
 
   function renderYesterdayComparison() {
