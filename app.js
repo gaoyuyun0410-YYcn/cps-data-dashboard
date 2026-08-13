@@ -12,8 +12,10 @@
 
   const periodOptions = [
     ["today", "今日"],
+    ["yesterday", "昨日"],
     ["7d", "近 7 天"],
     ["30d", "近 30 天"],
+    ["month", "本月"],
     ["all", "累计"],
   ];
   const metricOptions = [
@@ -337,34 +339,6 @@
           </div>
         </section>
 
-        <section class="reference-grid" aria-label="经营参考数据">
-          <article class="panel monthly-panel" aria-labelledby="monthlyTitle">
-            <div class="monthly-head">
-              <div>
-                <p class="panel-kicker">月度经营复盘</p>
-                <h2 id="monthlyTitle">本月与上月</h2>
-                <p class="monthly-range" id="monthlyRange">正在读取月度数据</p>
-              </div>
-              <span class="monthly-badge" id="monthlyBadge">统计中</span>
-            </div>
-            <div class="monthly-grid" id="monthlyGrid" aria-label="本月与上月指标"></div>
-            <div class="monthly-note" id="monthlyNote"></div>
-          </article>
-
-          <aside class="panel yesterday-panel" aria-labelledby="yesterdayTitle">
-            <div class="yesterday-head">
-              <div>
-                <p class="panel-kicker">日度参考</p>
-                <h2 id="yesterdayTitle">昨日对比</h2>
-                <p class="yesterday-range" id="yesterdayRange">正在读取昨日数据</p>
-              </div>
-              <span class="yesterday-badge">不含今日</span>
-            </div>
-            <div class="yesterday-grid" id="yesterdayGrid" aria-label="昨日与前日指标对比"></div>
-            <div class="yesterday-insight" id="yesterdayInsight"></div>
-          </aside>
-        </section>
-
         <footer>
           <div><span class="live-dot"></span> 数据来自云瞻公开推广看板 · 每 5 分钟自动刷新</div>
           <span>统计口径：有效下单 / 有效预估佣金 / 有效成交金额</span>
@@ -432,11 +406,22 @@
     return target;
   }
 
+  function dailyRowsForPeriod(source, period, offset = 0) {
+    const rows = [...source.daily].sort((left, right) => right.date.localeCompare(left.date));
+    if (period === "today") return rows.filter((row) => row.date === shanghaiDateKey(-offset));
+    if (period === "yesterday") return rows.filter((row) => row.date === shanghaiDateKey(-(offset + 1)));
+    if (period === "month") {
+      const [year, month] = shanghaiDateKey().split("-");
+      const prefix = `${year}-${month}-`;
+      return rows.filter((row) => row.date.startsWith(prefix));
+    }
+    const days = period === "7d" ? 7 : 30;
+    return rows.slice(offset, offset + days);
+  }
+
   function metricsFor(source, period, offset = 0) {
     if (period === "all") return offset === 0 ? { ...source.totals } : zeroMetrics();
-    const days = period === "today" ? 1 : period === "7d" ? 7 : 30;
-    return source.daily
-      .slice(offset, offset + days)
+    return dailyRowsForPeriod(source, period, offset)
       .reduce((sum, row) => addMetrics(sum, row), zeroMetrics());
   }
 
@@ -513,10 +498,10 @@
     const visible = selectedSources();
     const totals = visible.filter((source) => source.kind === "channel");
     const current = aggregate(totals, state.period);
-    const offset = state.period === "today" ? 1 : state.period === "7d" ? 7 : 0;
-    const previous = state.period === "all" || state.period === "30d"
-      ? zeroMetrics()
-      : aggregate(totals, state.period, offset);
+    let previous = zeroMetrics();
+    if (state.period === "today") previous = aggregate(totals, "today", 1);
+    if (state.period === "yesterday") previous = aggregate(totals, "today", 2);
+    if (state.period === "7d") previous = aggregate(totals, "7d", 7);
     return { visible, totals, current, previous };
   }
 
@@ -636,8 +621,6 @@
     renderTrend();
     renderChannels();
     renderRanking();
-    renderMonthlyComparison();
-    renderYesterdayComparison();
     setSyncState();
   }
 
@@ -652,8 +635,10 @@
     const grid = document.getElementById("kpiGrid");
     if (!grid) return;
     const { current, previous } = dashboardMetrics();
-    const canCompare = state.period === "today" || state.period === "7d";
-    const compareLabel = state.period === "today" ? "较昨日" : "较前 7 天";
+    const canCompare = state.period === "today" || state.period === "yesterday" || state.period === "7d";
+    const compareLabel = state.period === "today"
+      ? "较昨日"
+      : state.period === "yesterday" ? "较前日" : "较前 7 天";
     const kpis = [
       ["有效订单", `${integer(current.orders)} 笔`, ratio(current.orders, previous.orders), "blue"],
       ["预估佣金", `¥ ${money(current.commission)}`, ratio(current.commission, previous.commission), "red"],
@@ -867,12 +852,20 @@
     const title = document.getElementById("trendTitle");
     if (!chart || !title) return;
     const { totals } = dashboardMetrics();
-    const days = state.period === "today" ? 1 : state.period === "7d" ? 7 : 30;
     title.textContent = `${state.period === "all" ? "近 30 天" : periodOptions.find(([key]) => key === state.period)?.[1]}数据走势`;
-    const dates = Array.from(new Set(totals.flatMap((source) => source.daily.map((row) => row.date))))
-      .sort((left, right) => right.localeCompare(left))
-      .slice(0, days)
-      .reverse();
+    const allDates = Array.from(new Set(totals.flatMap((source) => source.daily.map((row) => row.date))))
+      .sort((left, right) => right.localeCompare(left));
+    let dates;
+    if (state.period === "today") dates = allDates.filter((date) => date === shanghaiDateKey());
+    else if (state.period === "yesterday") dates = allDates.filter((date) => date === shanghaiDateKey(-1));
+    else if (state.period === "month") {
+      const [year, month] = shanghaiDateKey().split("-");
+      dates = allDates.filter((date) => date.startsWith(`${year}-${month}-`));
+    } else {
+      const days = state.period === "7d" ? 7 : 30;
+      dates = allDates.slice(0, days);
+    }
+    dates.reverse();
     const trend = dates.map((date) => ({
       date,
       value: totals.reduce((sum, source) => {
@@ -998,6 +991,19 @@
     `;
   }
 
+  function periodGrowthCell(source) {
+    if (state.period === "today") {
+      return growthCell(metricsFor(source, "today").orders, metricsFor(source, "today", 1).orders);
+    }
+    if (state.period === "yesterday") {
+      return growthCell(metricsFor(source, "yesterday").orders, metricsFor(source, "today", 2).orders);
+    }
+    if (state.period === "month") {
+      return `<div class="growth-cell flat"><strong>本月累计</strong><small>${integer(metricsFor(source, "month").orders)} 单</small></div>`;
+    }
+    return growthCell(metricsFor(source, "7d").orders, metricsFor(source, "7d", 7).orders);
+  }
+
   function detailPeriodLabel() {
     if (state.period === "all") return "累计概览 · 每日明细展示近 30 天";
     return `${periodOptions.find(([key]) => key === state.period)?.[1] || "当前周期"}明细`;
@@ -1020,10 +1026,9 @@
     const current7 = metricsFor(source, "7d");
     const previous7 = metricsFor(source, "7d", 7);
     const growth = growthPresentation(current7.orders, previous7.orders);
-    const days = state.period === "today" ? 1 : state.period === "7d" ? 7 : 30;
-    const daily = [...source.daily]
-      .sort((left, right) => right.date.localeCompare(left.date))
-      .slice(0, days);
+    const daily = state.period === "all"
+      ? dailyRowsForPeriod(source, "30d")
+      : dailyRowsForPeriod(source, state.period);
     const dailyRows = daily.length
       ? daily.map((row, index) => {
         const previous = daily[index + 1];
@@ -1113,8 +1118,6 @@
       return;
     }
     body.innerHTML = rows.map((row, index) => {
-      const current7 = metricsFor(row, "7d").orders;
-      const previous7 = metricsFor(row, "7d", 7).orders;
       return `
         <tr>
           <td><span class="rank-number rank-${index + 1}">${String(index + 1).padStart(2, "0")}</span></td>
@@ -1131,7 +1134,7 @@
           <td>
             <div class="share-cell"><span>${row.share.toFixed(1)}%</span><i><em style="width:${Math.min(row.share, 100)}%"></em></i></div>
           </td>
-          <td>${growthCell(current7, previous7)}</td>
+          <td>${periodGrowthCell(row)}</td>
           <td><button class="detail-trigger" type="button" data-detail-id="${escapeHtml(row.id)}">查看详情</button></td>
         </tr>
       `;
