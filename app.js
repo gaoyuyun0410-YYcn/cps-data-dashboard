@@ -339,6 +339,22 @@
           </div>
         </section>
 
+        <section class="panel forecast-panel" aria-labelledby="forecastTitle">
+          <div class="forecast-head">
+            <div>
+              <p class="panel-kicker">佣金预测与异常判断</p>
+              <h2 id="forecastTitle">理论基准 vs 动态预测</h2>
+              <p>固定标尺用于识别异常，动态模型随实际趋势每日更新</p>
+            </div>
+            <span class="forecast-scope" id="forecastScope">小红书渠道</span>
+          </div>
+          <div class="forecast-grid" id="forecastGrid"></div>
+          <div class="forecast-bottom">
+            <div class="forecast-status" id="forecastStatus"></div>
+            <div class="forecast-method" id="forecastMethod"></div>
+          </div>
+        </section>
+
         <footer>
           <div><span class="live-dot"></span> 数据来自云瞻公开推广看板 · 每 5 分钟自动刷新</div>
           <span>统计口径：有效下单 / 有效预估佣金 / 有效成交金额</span>
@@ -621,6 +637,7 @@
     renderTrend();
     renderChannels();
     renderRanking();
+    renderForecast();
     setSyncState();
   }
 
@@ -733,6 +750,130 @@
       tone: change > 0 ? "up" : "down",
       label: `${change > 0 ? "↑" : "↓"} ${Math.abs(change).toFixed(1)}%`,
     };
+  }
+
+  function startOfWeek(dateKey) {
+    const [year, month, day] = dateKey.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    const weekday = date.getUTCDay() || 7;
+    date.setUTCDate(date.getUTCDate() - weekday + 1);
+    return date.toISOString().slice(0, 10);
+  }
+
+  function endOfMonth(dateKey) {
+    const [year, month] = dateKey.split("-").map(Number);
+    return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+  }
+
+  function daysBetweenInclusive(start, end) {
+    const left = Date.parse(`${start}T00:00:00Z`);
+    const right = Date.parse(`${end}T00:00:00Z`);
+    return Math.max(0, Math.round((right - left) / 86400000) + 1);
+  }
+
+  function commissionBetween(source, start, end) {
+    return source.daily
+      .filter((row) => row.date >= start && row.date <= end)
+      .reduce((sum, row) => sum + row.commission, 0);
+  }
+
+  function forecastAmount(value) {
+    return `¥ ${money(Math.max(0, value))}`;
+  }
+
+  function renderForecast() {
+    const grid = document.getElementById("forecastGrid");
+    const status = document.getElementById("forecastStatus");
+    const method = document.getElementById("forecastMethod");
+    const scope = document.getElementById("forecastScope");
+    if (!grid || !status || !method || !scope) return;
+
+    const source = (state.data?.sources || []).find((item) => item.id === "xhs-total");
+    const baseline = state.config?.forecastBaseline;
+    scope.textContent = "小红书渠道 · 不受上方渠道筛选影响";
+    if (!source || !baseline) {
+      grid.innerHTML = '<div class="forecast-empty">正在建立佣金预测模型…</div>';
+      status.textContent = "等待小红书渠道数据";
+      method.textContent = "";
+      return;
+    }
+
+    const today = shanghaiDateKey();
+    const yesterday = shanghaiDateKey(-1);
+    const weekStart = startOfWeek(today);
+    const monthStart = `${today.slice(0, 8)}01`;
+    const monthEnd = endOfMonth(today);
+    const elapsedWeekDays = Math.max(1, daysBetweenInclusive(weekStart, today));
+    const remainingWeekDays = Math.max(0, 7 - elapsedWeekDays);
+    const elapsedMonthDays = Math.max(1, Number(today.slice(8, 10)));
+    const totalMonthDays = Number(monthEnd.slice(8, 10));
+    const remainingMonthDays = Math.max(0, totalMonthDays - elapsedMonthDays);
+
+    const completeRows = source.daily.filter((row) => row.date <= yesterday);
+    const recent7 = completeRows.slice(0, 7).reduce((sum, row) => sum + row.commission, 0);
+    const prior7 = completeRows.slice(7, 14).reduce((sum, row) => sum + row.commission, 0);
+    const recent14Daily = completeRows.slice(0, 14).reduce((sum, row) => sum + row.commission, 0) / Math.max(1, Math.min(14, completeRows.length));
+    const recent7Daily = recent7 / Math.max(1, Math.min(7, completeRows.length));
+    const momentum = prior7 > 0 ? Math.max(.65, Math.min(1.55, recent7 / prior7)) : 1;
+    const dynamicDaily = (recent7Daily * .7 + recent14Daily * .3) * Math.pow(momentum, 1 / 14);
+
+    const frozenAt = baseline.frozenAt;
+    const weeksSinceFreeze = Math.max(0, daysBetweenInclusive(frozenAt, today) - 1) / 7;
+    const theoreticalWeekly = baseline.weeklyBaseCommission * Math.pow(1 + baseline.weeklyGrowthRate, weeksSinceFreeze);
+    const theoreticalDaily = theoreticalWeekly / 7;
+    const actualWeek = commissionBetween(source, weekStart, today);
+    const actualMonth = commissionBetween(source, monthStart, today);
+
+    const theoretical = {
+      tomorrow: theoreticalDaily,
+      week: actualWeek + theoreticalDaily * remainingWeekDays,
+      nextWeek: theoreticalWeekly * (1 + baseline.weeklyGrowthRate),
+      month: actualMonth + theoreticalDaily * remainingMonthDays,
+    };
+    const dynamic = {
+      tomorrow: dynamicDaily,
+      week: actualWeek + dynamicDaily * remainingWeekDays,
+      nextWeek: dynamicDaily * 7 * Math.pow(momentum, .5),
+      month: actualMonth + dynamicDaily * remainingMonthDays,
+    };
+
+    const items = [
+      ["明日佣金", theoretical.tomorrow, dynamic.tomorrow, "未来 1 天"],
+      ["本周最终", theoretical.week, dynamic.week, `已发生 ${forecastAmount(actualWeek)}`],
+      ["下周佣金", theoretical.nextWeek, dynamic.nextWeek, "未来完整 7 天"],
+      ["本月最终", theoretical.month, dynamic.month, `已发生 ${forecastAmount(actualMonth)}`],
+    ];
+    grid.innerHTML = items.map(([label, fixed, rolling, note]) => {
+      const gap = fixed ? ((rolling - fixed) / fixed) * 100 : 0;
+      const tone = gap > 15 ? "above" : gap < -15 ? "below" : "normal";
+      return `
+        <article class="forecast-card ${tone}">
+          <div class="forecast-card-head"><span>${label}</span><em>${note}</em></div>
+          <div class="forecast-values">
+            <div><small>理论基准</small><b>${forecastAmount(fixed)}</b></div>
+            <div><small>动态预测</small><strong>${forecastAmount(rolling)}</strong></div>
+          </div>
+          <p>${gap >= 0 ? "高于" : "低于"}基准 ${Math.abs(gap).toFixed(1)}%</p>
+        </article>
+      `;
+    }).join("");
+
+    const performanceGap = theoreticalDaily ? ((recent7Daily - theoreticalDaily) / theoreticalDaily) * 100 : 0;
+    const statusTone = performanceGap > 20 ? "above" : performanceGap < -20 ? "below" : "normal";
+    const statusTitle = statusTone === "above" ? "近期显著高于理论" : statusTone === "below" ? "近期低于理论基准" : "近期处于正常区间";
+    const suggestion = statusTone === "above"
+      ? "检查近期是否有高佣活动、新增推广位或爆款笔记；若活动结束，动态预测可能回落。"
+      : statusTone === "below"
+        ? "优先检查笔记曝光、点击转化、活动失效及高贡献推广位下滑，并安排内容优化。"
+        : "继续保持当前发布节奏，重点观察动态预测是否连续 3 天偏离理论基准。";
+    status.className = `forecast-status ${statusTone}`;
+    status.innerHTML = `<span></span><div><strong>${statusTitle}</strong><p>近 7 个完整自然日日均佣金 ${forecastAmount(recent7Daily)}，相对理论日均 ${performanceGap >= 0 ? "+" : ""}${performanceGap.toFixed(1)}%。${suggestion}</p></div>`;
+    method.innerHTML = `
+      <strong>模型口径</strong>
+      <p><b>理论基准：</b>${shortDateLabel(baseline.frozenAt)}冻结，基准周佣金 ${forecastAmount(baseline.weeklyBaseCommission)}，稳健周增长率 ${(baseline.weeklyGrowthRate * 100).toFixed(0)}%。</p>
+      <p><b>动态预测：</b>近 7 天日均占 70% + 近 14 天日均占 30%，并用近两周动量修正；每日刷新。</p>
+      <small>预测用于经营判断，不等同于平台结算承诺；高佣活动和新笔记爆发会造成短期偏离。</small>
+    `;
   }
 
   function renderMonthlyComparison() {
