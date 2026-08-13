@@ -302,16 +302,20 @@
             <div id="trendChart"></div>
           </article>
 
-          <aside class="panel channel-panel">
-            <div class="panel-head compact-head">
+          <aside class="panel forecast-panel forecast-sidebar" aria-labelledby="forecastTitle">
+            <div class="forecast-head">
               <div>
-                <p class="panel-kicker">渠道对比</p>
-                <h2>渠道贡献</h2>
+                <p class="panel-kicker">佣金预测与异常判断</p>
+                <h2 id="forecastTitle">理论基准 vs 动态预测</h2>
+                <p>固定标尺识别异常，动态模型随实际趋势每日更新</p>
               </div>
-              <span class="source-count" id="sourceCount">0/12 数据源正常</span>
+              <span class="forecast-scope" id="forecastScope">小红书渠道</span>
             </div>
-            <div class="channel-list" id="channelList"></div>
-            <div id="reconcileBox"></div>
+            <div class="forecast-grid" id="forecastGrid"></div>
+            <div class="forecast-bottom">
+              <div class="forecast-status" id="forecastStatus"></div>
+              <div class="forecast-method" id="forecastMethod"></div>
+            </div>
           </aside>
         </section>
 
@@ -331,7 +335,7 @@
               <thead>
                 <tr>
                   <th>排名</th><th>渠道 / 推广位</th><th>有效订单</th><th>成交金额</th>
-                  <th>预估佣金</th><th>客单价</th><th>订单贡献</th><th>增长趋势</th><th>数据详情</th>
+                  <th>预估佣金</th><th>佣金率</th><th>客单价</th><th>订单贡献</th><th>增长趋势</th><th>数据详情</th>
                 </tr>
               </thead>
               <tbody id="rankingBody"></tbody>
@@ -339,20 +343,16 @@
           </div>
         </section>
 
-        <section class="panel forecast-panel" aria-labelledby="forecastTitle">
-          <div class="forecast-head">
+        <section class="panel channel-panel channel-panel-secondary">
+          <div class="panel-head compact-head">
             <div>
-              <p class="panel-kicker">佣金预测与异常判断</p>
-              <h2 id="forecastTitle">理论基准 vs 动态预测</h2>
-              <p>固定标尺用于识别异常，动态模型随实际趋势每日更新</p>
+              <p class="panel-kicker">辅助参考</p>
+              <h2>渠道贡献</h2>
             </div>
-            <span class="forecast-scope" id="forecastScope">小红书渠道</span>
+            <span class="source-count" id="sourceCount">0/12 数据源正常</span>
           </div>
-          <div class="forecast-grid" id="forecastGrid"></div>
-          <div class="forecast-bottom">
-            <div class="forecast-status" id="forecastStatus"></div>
-            <div class="forecast-method" id="forecastMethod"></div>
-          </div>
+          <div class="channel-list" id="channelList"></div>
+          <div id="reconcileBox"></div>
         </section>
 
         <footer>
@@ -826,9 +826,9 @@
 
     const theoretical = {
       tomorrow: theoreticalDaily,
-      week: actualWeek + theoreticalDaily * remainingWeekDays,
+      week: theoreticalWeekly,
       nextWeek: theoreticalWeekly * (1 + baseline.weeklyGrowthRate),
-      month: actualMonth + theoreticalDaily * remainingMonthDays,
+      month: theoreticalDaily * totalMonthDays,
     };
     const dynamic = {
       tomorrow: dynamicDaily,
@@ -1255,7 +1255,7 @@
     if (!body) return;
     const rows = promotionRows();
     if (!rows.length) {
-      body.innerHTML = '<tr><td colspan="9"><div class="table-empty">没有找到匹配的推广位</div></td></tr>';
+      body.innerHTML = '<tr><td colspan="10"><div class="table-empty">没有找到匹配的推广位</div></td></tr>';
       return;
     }
     body.innerHTML = rows.map((row, index) => {
@@ -1271,6 +1271,7 @@
           <td><b>${integer(row.metrics.orders)}</b></td>
           <td>¥ ${money(row.metrics.gmv)}</td>
           <td>¥ ${money(row.metrics.commission)}</td>
+          <td><span class="commission-rate" title="预估佣金 ÷ 成交金额">${row.metrics.gmv ? `${((row.metrics.commission / row.metrics.gmv) * 100).toFixed(2)}%` : "—"}</span></td>
           <td>¥ ${row.metrics.orders ? money(row.metrics.gmv / row.metrics.orders) : "0.00"}</td>
           <td>
             <div class="share-cell"><span>${row.share.toFixed(1)}%</span><i><em style="width:${Math.min(row.share, 100)}%"></em></i></div>
