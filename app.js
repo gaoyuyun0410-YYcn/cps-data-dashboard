@@ -343,6 +343,19 @@
           </div>
         </section>
 
+        <section class="panel peak-panel" aria-labelledby="peakTitle">
+          <div class="peak-head">
+            <div>
+              <p class="panel-kicker">订单时段洞察</p>
+              <h2 id="peakTitle">收入前三推广位 · 下单高峰</h2>
+              <p>按预估佣金排名，观察每个推广位连续两小时的集中下单区间</p>
+            </div>
+            <span class="peak-date" id="peakDate"></span>
+          </div>
+          <div class="peak-grid" id="peakGrid"></div>
+          <div class="peak-note" id="peakNote"></div>
+        </section>
+
         <section class="panel channel-panel channel-panel-secondary">
           <div class="panel-head compact-head">
             <div>
@@ -638,6 +651,7 @@
     renderChannels();
     renderRanking();
     renderForecast();
+    renderOrderPeaks();
     setSyncState();
   }
 
@@ -874,6 +888,85 @@
       <p><b>动态预测：</b>近 7 天日均占 70% + 近 14 天日均占 30%，并用近两周动量修正；每日刷新。</p>
       <small>预测用于经营判断，不等同于平台结算承诺；高佣活动和新笔记爆发会造成短期偏离。</small>
     `;
+  }
+
+  function peakWindow(hours) {
+    const windows = hours.map((value, index) => value + hours[(index + 1) % 24]);
+    const start = windows.reduce(
+      (best, value, index) => value > windows[best] ? index : best,
+      0,
+    );
+    return { start, orders: windows[start] };
+  }
+
+  function hourLabel(hour) {
+    return `${String((hour + 24) % 24).padStart(2, "0")}:00`;
+  }
+
+  function peakConfidence(orders) {
+    if (orders >= 30) return { tone: "high", label: "样本充足" };
+    if (orders >= 10) return { tone: "medium", label: "样本一般" };
+    return { tone: "low", label: "样本较少" };
+  }
+
+  function peakAdvice(start, orders) {
+    if (orders < 10) return "订单样本较少，暂不据此调整主推时段";
+    return `建议 ${hourLabel(start - 2)}—${hourLabel(start - 1)} 完成笔记发布或加热`;
+  }
+
+  function renderOrderPeaks() {
+    const grid = document.getElementById("peakGrid");
+    const date = document.getElementById("peakDate");
+    const note = document.getElementById("peakNote");
+    if (!grid || !date || !note) return;
+
+    const snapshot = state.config?.orderPeakSnapshot;
+    if (!snapshot?.promotions?.length) {
+      grid.innerHTML = '<div class="peak-empty">等待导入订单明细后生成时段洞察</div>';
+      date.textContent = "暂无订单明细";
+      note.textContent = "该板块只使用真实订单付款时间，不使用每日汇总数据推测。";
+      return;
+    }
+
+    const isYesterday = snapshot.date === shanghaiDateKey(-1);
+    date.textContent = `${shortDateLabel(snapshot.date)} · ${isYesterday ? "昨日明细" : "最近已导入"}`;
+    const top = [...snapshot.promotions]
+      .sort((left, right) => right.commission - left.commission || right.orders - left.orders)
+      .slice(0, 3);
+
+    grid.innerHTML = top.map((promotion, index) => {
+      const hours = promotion.hours.map((value) => number(value));
+      const peak = peakWindow(hours);
+      const maximum = Math.max(...hours, 1);
+      const share = promotion.orders ? (peak.orders / promotion.orders) * 100 : 0;
+      const confidence = peakConfidence(promotion.orders);
+      const peakHours = new Set([peak.start, (peak.start + 1) % 24]);
+      const chartLabel = hours.map((value, hour) => `${hourLabel(hour)} ${integer(value)}单`).join("，");
+      return `
+        <article class="peak-card peak-rank-${index + 1}">
+          <div class="peak-card-head">
+            <div><span>TOP ${index + 1}</span><h3>${escapeHtml(promotion.promotion)}</h3></div>
+            <em class="confidence ${confidence.tone}">${confidence.label}</em>
+          </div>
+          <div class="peak-summary">
+            <div><small>连续两小时高峰</small><strong>${hourLabel(peak.start)}—${hourLabel(peak.start + 2)}</strong></div>
+            <div><small>高峰订单</small><strong>${integer(peak.orders)} 单</strong><span>占当日 ${share.toFixed(1)}%</span></div>
+          </div>
+          <div class="hour-bars" role="img" aria-label="${escapeHtml(promotion.promotion)}每小时订单：${escapeHtml(chartLabel)}">
+            ${hours.map((value, hour) => `
+              <i class="${peakHours.has(hour) ? "active" : ""}" style="height:${Math.max(value ? 12 : 3, (value / maximum) * 100)}%" title="${hourLabel(hour)} ${integer(value)} 单"></i>
+            `).join("")}
+          </div>
+          <div class="hour-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+          <div class="peak-card-foot">
+            <span>有效 ${integer(promotion.orders)} 单 · 佣金 ¥${money(promotion.commission)}</span>
+            <b>${peakAdvice(peak.start, promotion.orders)}</b>
+          </div>
+        </article>
+      `;
+    }).join("");
+
+    note.innerHTML = `<span>口径</span> 剔除 ${integer(snapshot.invalidOrdersExcluded)} 笔失效订单；以付款时间统计，收入按“预估结算金额 + 预估激励”排序。高峰采用连续两小时窗口，样本少于 10 单时仅供观察。`;
   }
 
   function renderMonthlyComparison() {
