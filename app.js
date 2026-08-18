@@ -928,7 +928,7 @@
 
   function peakAdvice(start, confidence) {
     if (confidence === "low") return "当前分组样本较少，建议继续积累后再调整时段";
-    return `建议 ${hourLabel(start - 2)}—${hourLabel(start - 1)} 完成笔记发布或加热`;
+    return `建议 ${hourLabel(start - 2)}—${hourLabel(start)} 完成笔记发布或加热`;
   }
 
   function segmentLabel(key) {
