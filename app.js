@@ -35,6 +35,7 @@
     channel: "全部",
     period: "30d",
     trendMetric: "orders",
+    peakSegment: "weekday",
     search: "",
     timer: null,
   };
@@ -347,10 +348,17 @@
           <div class="peak-head">
             <div>
               <p class="panel-kicker">订单时段洞察</p>
-              <h2 id="peakTitle">收入前三推广位 · 下单高峰</h2>
-              <p>按预估佣金排名，观察每个推广位连续两小时的集中下单区间</p>
+              <h2 id="peakTitle">历史模型 · 收入前三推广位</h2>
+              <p>分开观察工作日、周末和近期趋势，降低单日爆量造成的误判</p>
             </div>
-            <span class="peak-date" id="peakDate"></span>
+            <div class="peak-actions">
+              <span class="peak-date" id="peakDate"></span>
+              <div class="metric-switch peak-switch" aria-label="下单高峰统计口径">
+                <button data-peak-segment="weekday" class="active">工作日</button>
+                <button data-peak-segment="weekend">周末</button>
+                <button data-peak-segment="recent14">近期 14 天</button>
+              </div>
+            </div>
           </div>
           <div class="peak-grid" id="peakGrid"></div>
           <div class="peak-note" id="peakNote"></div>
@@ -411,6 +419,15 @@
           item.classList.toggle("active", item === button);
         });
         renderTrend();
+      });
+    });
+    document.querySelectorAll("[data-peak-segment]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.peakSegment = button.dataset.peakSegment;
+        document.querySelectorAll("[data-peak-segment]").forEach((item) => {
+          item.classList.toggle("active", item === button);
+        });
+        renderOrderPeaks();
       });
     });
     document.getElementById("promotionSearch")?.addEventListener("input", (event) => {
@@ -903,15 +920,29 @@
     return `${String((hour + 24) % 24).padStart(2, "0")}:00`;
   }
 
-  function peakConfidence(orders) {
-    if (orders >= 30) return { tone: "high", label: "样本充足" };
-    if (orders >= 10) return { tone: "medium", label: "样本一般" };
+  function peakConfidence(segment) {
+    if (segment.activeDays >= 10 && segment.orders >= 100) return { tone: "high", label: "样本充足" };
+    if (segment.activeDays >= 5 && segment.orders >= 30) return { tone: "medium", label: "样本一般" };
     return { tone: "low", label: "样本较少" };
   }
 
-  function peakAdvice(start, orders) {
-    if (orders < 10) return "订单样本较少，暂不据此调整主推时段";
+  function peakAdvice(start, confidence) {
+    if (confidence === "low") return "当前分组样本较少，建议继续积累后再调整时段";
     return `建议 ${hourLabel(start - 2)}—${hourLabel(start - 1)} 完成笔记发布或加热`;
+  }
+
+  function segmentLabel(key) {
+    return { weekday: "工作日常态", weekend: "周末常态", recent14: "近期 14 天" }[key] || "历史常态";
+  }
+
+  function latestPeakStatus(latest) {
+    if (!latest?.orders) return { tone: "normal", text: "最近一天暂无订单" };
+    const volumeAnomaly = latest.volumeRatio >= 2.5;
+    const timeAnomaly = latest.peakShiftHours >= 5;
+    if (volumeAnomaly && timeAnomaly) return { tone: "anomaly", text: "最近一天量级与时段均显著偏离常态" };
+    if (volumeAnomaly) return { tone: "anomaly", text: "最近一天量级异常放大，但高峰时段与常态一致" };
+    if (timeAnomaly) return { tone: "anomaly", text: `最近一天高峰偏离常态 ${integer(latest.peakShiftHours)} 小时，疑似短期波动` };
+    return { tone: "normal", text: "最近一天高峰与同类日期常态基本一致" };
   }
 
   function renderOrderPeaks() {
@@ -928,20 +959,24 @@
       return;
     }
 
-    const isYesterday = snapshot.date === shanghaiDateKey(-1);
-    date.textContent = `${shortDateLabel(snapshot.date)} · ${isYesterday ? "昨日明细" : "最近已导入"}`;
+    date.textContent = `${shortDateLabel(snapshot.minDate)}—${shortDateLabel(snapshot.maxDate)} · ${integer(snapshot.validOrders)} 笔有效订单`;
     const top = [...snapshot.promotions]
       .sort((left, right) => right.commission - left.commission || right.orders - left.orders)
       .slice(0, 3);
 
     grid.innerHTML = top.map((promotion, index) => {
-      const hours = promotion.hours.map((value) => number(value));
-      const peak = peakWindow(hours);
+      const segment = promotion.segments?.[state.peakSegment] || promotion.segments?.weekday;
+      const hours = (segment?.hours || []).map((value) => number(value));
+      const peak = { start: segment?.peakStart ?? peakWindow(hours).start, orders: segment?.peakShare ?? 0 };
       const maximum = Math.max(...hours, 1);
-      const share = promotion.orders ? (peak.orders / promotion.orders) * 100 : 0;
-      const confidence = peakConfidence(promotion.orders);
+      const share = number(segment?.peakShare) * 100;
+      const confidence = peakConfidence(segment || { activeDays: 0, orders: 0 });
       const peakHours = new Set([peak.start, (peak.start + 1) % 24]);
-      const chartLabel = hours.map((value, hour) => `${hourLabel(hour)} ${integer(value)}单`).join("，");
+      const chartLabel = hours.map((value, hour) => `${hourLabel(hour)} ${(value * 100).toFixed(1)}%`).join("，");
+      const latest = promotion.latest || {};
+      const latestLabel = latest.date === shanghaiDateKey(-1) ? "昨日" : shortDateLabel(latest.date);
+      const latestStatus = latestPeakStatus(latest);
+      const comparisonKeys = ["weekday", "weekend", "recent14"];
       return `
         <article class="peak-card peak-rank-${index + 1}">
           <div class="peak-card-head">
@@ -949,24 +984,34 @@
             <em class="confidence ${confidence.tone}">${confidence.label}</em>
           </div>
           <div class="peak-summary">
-            <div><small>连续两小时高峰</small><strong>${hourLabel(peak.start)}—${hourLabel(peak.start + 2)}</strong></div>
-            <div><small>高峰订单</small><strong>${integer(peak.orders)} 单</strong><span>占当日 ${share.toFixed(1)}%</span></div>
+            <div><small>${segmentLabel(state.peakSegment)} · 连续两小时</small><strong>${hourLabel(peak.start)}—${hourLabel(peak.start + 2)}</strong></div>
+            <div><small>高峰订单占比</small><strong>${share.toFixed(1)}%</strong><span>${integer(segment?.activeDays || 0)} 个有单日 · ${integer(segment?.orders || 0)} 单</span></div>
           </div>
           <div class="hour-bars" role="img" aria-label="${escapeHtml(promotion.promotion)}每小时订单：${escapeHtml(chartLabel)}">
             ${hours.map((value, hour) => `
-              <i class="${peakHours.has(hour) ? "active" : ""}" style="height:${Math.max(value ? 12 : 3, (value / maximum) * 100)}%" title="${hourLabel(hour)} ${integer(value)} 单"></i>
+              <i class="${peakHours.has(hour) ? "active" : ""}" style="height:${Math.max(value ? 12 : 3, (value / maximum) * 100)}%" title="${hourLabel(hour)} ${(value * 100).toFixed(1)}%"></i>
             `).join("")}
           </div>
           <div class="hour-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+          <div class="peak-comparisons">
+            ${comparisonKeys.map((key) => {
+              const item = promotion.segments?.[key];
+              return `<span class="${key === state.peakSegment ? "selected" : ""}"><small>${segmentLabel(key)}</small><b>${hourLabel(item?.peakStart || 0)}—${hourLabel((item?.peakStart || 0) + 2)}</b></span>`;
+            }).join("")}
+          </div>
+          <div class="peak-latest ${latestStatus.tone}">
+            <span>${latestLabel} ${integer(latest.orders || 0)} 单 · 高峰 ${hourLabel(latest.peakStart || 0)}—${hourLabel((latest.peakStart || 0) + 2)}</span>
+            <b>${latestStatus.text}</b>
+          </div>
           <div class="peak-card-foot">
-            <span>有效 ${integer(promotion.orders)} 单 · 佣金 ¥${money(promotion.commission)}</span>
-            <b>${peakAdvice(peak.start, promotion.orders)}</b>
+            <span>31 日合计 ${integer(promotion.orders)} 单 · 佣金 ¥${money(promotion.commission)}</span>
+            <b>${peakAdvice(peak.start, confidence.tone)}</b>
           </div>
         </article>
       `;
     }).join("");
 
-    note.innerHTML = `<span>口径</span> 剔除 ${integer(snapshot.invalidOrdersExcluded)} 笔失效订单；以付款时间统计，收入按“预估结算金额 + 预估激励”排序。高峰采用连续两小时窗口，样本少于 10 单时仅供观察。`;
+    note.innerHTML = `<span>模型口径</span> 历史 ${integer(snapshot.calendarDays)} 天，剔除 ${integer(snapshot.invalidOrdersExcluded)} 笔失效订单。工作日与周末分别按“每日小时占比”计算，并使用 10% 截尾平均形成稳定基线，单日爆量只会触发异常提示；“近期 14 天”使用每日 0.9 衰减权重，更快反映新趋势。收入按“预估结算金额 + 预估激励”排序。`;
   }
 
   function renderMonthlyComparison() {

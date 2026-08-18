@@ -373,7 +373,10 @@ td b { color: var(--ink); font-size: 13px; }
 .peak-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .peak-head h2 { margin: 0; font-size: 16px; letter-spacing: -.02em; }
 .peak-head > div > p:last-child { margin: 6px 0 0; color: #7d8794; font-size: 10px; }
+.peak-actions { display: flex; flex: 0 0 auto; align-items: flex-end; flex-direction: column; gap: 8px; }
 .peak-date { padding: 6px 9px; border-radius: 20px; background: #edf3ff; color: #315fc5; font-size: 9px; font-weight: 750; white-space: nowrap; }
+.peak-switch { padding: 3px; }
+.peak-switch button { padding: 6px 9px; font-size: 8px; }
 .peak-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 17px; }
 .peak-card { min-width: 0; padding: 15px; border: 1px solid #e7ebf1; border-radius: 14px; background: #fff; }
 .peak-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -395,6 +398,20 @@ td b { color: var(--ink); font-size: 13px; }
 .hour-bars i { flex: 1; min-width: 2px; border-radius: 3px 3px 1px 1px; background: #dce4f8; transition: height .2s ease; }
 .hour-bars i.active { background: linear-gradient(180deg, #5f83ff, #285dff); }
 .hour-axis { display: flex; justify-content: space-between; margin-top: 5px; color: #a0a6af; font-size: 7px; }
+.peak-comparisons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin-top: 12px; }
+.peak-comparisons > span { min-width: 0; padding: 7px 6px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; }
+.peak-comparisons > span.selected { border-color: #cbd8ff; background: #f2f5ff; }
+.peak-comparisons small, .peak-comparisons b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.peak-comparisons small { color: #9aa1aa; font-size: 7px; }
+.peak-comparisons b { margin-top: 3px; color: #596577; font-size: 8px; }
+.peak-comparisons > span.selected b { color: #285dff; }
+.peak-latest { display: flex; align-items: flex-start; flex-direction: column; gap: 3px; margin-top: 9px; padding: 8px 9px; border-radius: 8px; background: #edf8f3; }
+.peak-latest span, .peak-latest b { font-size: 8px; line-height: 1.45; }
+.peak-latest span { color: #617267; }
+.peak-latest b { color: #118252; }
+.peak-latest.anomaly { background: #fff5e9; }
+.peak-latest.anomaly span { color: #7b6c5b; }
+.peak-latest.anomaly b { color: #b56a15; }
 .peak-card-foot { display: flex; flex-direction: column; gap: 6px; margin-top: 13px; }
 .peak-card-foot span { color: #7d8794; font-size: 9px; }
 .peak-card-foot b { color: #485568; font-size: 9px; font-weight: 700; line-height: 1.45; }
@@ -638,6 +655,7 @@ footer .live-dot { width: 6px; height: 6px; box-shadow: none; }
   .forecast-bottom { grid-template-columns: 1fr; }
   .peak-panel { padding: 16px; }
   .peak-head { align-items: stretch; flex-direction: column; }
+  .peak-actions { align-items: flex-start; }
   .peak-date { align-self: flex-start; }
   .channel-panel-secondary .channel-list { grid-template-columns: 1fr; }
   .detail-overlay { padding: 12px; }
