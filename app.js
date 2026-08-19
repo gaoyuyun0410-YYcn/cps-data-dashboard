@@ -41,6 +41,7 @@
     dailyChannel: "小红书",
     dailySearch: "",
     dailySort: "orders",
+    dailyLayout: "matrix",
     expandedDates: new Set(),
     dailyExpansionReady: false,
     search: "",
@@ -430,7 +431,14 @@
                 <button data-daily-sort="commission">按佣金</button>
               </div>
             </div>
-            <small>日期从新到旧排列，点击日期可展开或收起</small>
+            <div>
+              <span>查看方式</span>
+              <div class="segmented compact-segmented">
+                <button data-daily-layout="matrix" class="active">横向对比</button>
+                <button data-daily-layout="list">展开明细</button>
+              </div>
+            </div>
+            <small id="dailySortFeedback">推广位列按所选范围订单从高到低排列</small>
           </section>
 
           <section class="daily-kpi-grid" id="dailyKpis" aria-label="每日明细汇总"></section>
@@ -449,9 +457,22 @@
                 <p class="panel-kicker">逐日明细</p>
                 <h2>日期 × 推广位数据表</h2>
               </div>
-              <div class="signal-legend"><span class="surge">放量</span><span class="drop">回落</span><span class="new">新增</span><span class="steady">平稳</span></div>
+              <div class="daily-table-actions">
+                <div class="signal-legend"><span class="surge">放量</span><span class="drop">回落</span><span class="new">新增</span><span class="steady">平稳</span></div>
+                <div class="matrix-scroll-controls" id="matrixScrollControls">
+                  <button type="button" data-matrix-scroll="-1" aria-label="向左查看更多推广位">←</button>
+                  <span>左右滑动查看全部推广位</span>
+                  <button type="button" data-matrix-scroll="1" aria-label="向右查看更多推广位">→</button>
+                </div>
+              </div>
             </div>
-            <div class="table-wrap daily-table-wrap">
+            <div class="daily-matrix-wrap" id="dailyMatrixScroll">
+              <table class="daily-matrix-table">
+                <thead id="dailyMatrixHead"></thead>
+                <tbody id="dailyMatrixBody"></tbody>
+              </table>
+            </div>
+            <div class="table-wrap daily-table-wrap hidden" id="dailyListView">
               <table class="daily-data-table">
                 <thead><tr><th>日期 / 推广位</th><th>渠道</th><th>有效订单</th><th>成交金额</th><th>预估佣金</th><th>佣金率</th><th>日环比</th><th>变化信号</th></tr></thead>
                 <tbody id="dailyTableBody"></tbody>
@@ -547,7 +568,22 @@
       button.addEventListener("click", () => {
         state.dailySort = button.dataset.dailySort;
         document.querySelectorAll("[data-daily-sort]").forEach((item) => item.classList.toggle("active", item === button));
-        renderDailyTable();
+        renderDailyView();
+      });
+    });
+    document.querySelectorAll("[data-daily-layout]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.dailyLayout = button.dataset.dailyLayout;
+        document.querySelectorAll("[data-daily-layout]").forEach((item) => item.classList.toggle("active", item === button));
+        renderDailyLayoutVisibility();
+      });
+    });
+    document.querySelectorAll("[data-matrix-scroll]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const container = document.getElementById("dailyMatrixScroll");
+        if (!container) return;
+        const direction = number(button.dataset.matrixScroll) || 1;
+        container.scrollBy({ left: direction * Math.max(420, container.clientWidth * 0.72), behavior: "smooth" });
       });
     });
     document.getElementById("dailySearch")?.addEventListener("input", (event) => {
@@ -883,6 +919,52 @@
     return sources.map((source) => ({ ...source, rangeMetrics: metricsForDates(source, dates) }));
   }
 
+  function sortedDailySources(sources, dates) {
+    const key = state.dailySort === "commission" ? "commission" : "orders";
+    return dailyRangeStats(sources, dates).sort((left, right) =>
+      right.rangeMetrics[key] - left.rangeMetrics[key]
+      || right.rangeMetrics.orders - left.rangeMetrics.orders
+      || left.promotion.localeCompare(right.promotion, "zh-CN"));
+  }
+
+  function renderDailyLayoutVisibility() {
+    const matrix = document.getElementById("dailyMatrixScroll");
+    const list = document.getElementById("dailyListView");
+    const controls = document.getElementById("matrixScrollControls");
+    const isMatrix = state.dailyLayout === "matrix";
+    matrix?.classList.toggle("hidden", !isMatrix);
+    list?.classList.toggle("hidden", isMatrix);
+    controls?.classList.toggle("hidden", !isMatrix);
+  }
+
+  function renderDailyMatrix(sources, dates) {
+    const head = document.getElementById("dailyMatrixHead");
+    const body = document.getElementById("dailyMatrixBody");
+    if (!head || !body) return;
+    const sorted = sortedDailySources(sources, dates);
+    if (!sorted.length || !dates.length) {
+      head.innerHTML = "";
+      body.innerHTML = '<tr><td><div class="table-empty">当前筛选下暂无每日数据</div></td></tr>';
+      return;
+    }
+    head.innerHTML = `<tr><th><span>日期</span><small>新 → 旧</small></th>${sorted.map((source, index) => `
+      <th title="${escapeHtml(source.promotion)}">
+        <div class="matrix-promotion-head"><span>${String(index + 1).padStart(2, "0")}</span><strong>${escapeHtml(source.promotion)}</strong></div>
+        <small>${integer(source.rangeMetrics.orders)} 单 · ¥${money(source.rangeMetrics.commission)}</small>
+      </th>`).join("")}</tr>`;
+    const totalRow = `<tr class="matrix-total-row"><td><strong>范围合计</strong><small>${dates.length} 个自然日</small></td>${sorted.map((source) => `
+      <td><b>${integer(source.rangeMetrics.orders)} 单</b><strong>¥ ${money(source.rangeMetrics.commission)}</strong></td>`).join("")}</tr>`;
+    const dayRows = dates.map((dateKey) => {
+      const dayTotal = metricsForDate(sources, dateKey);
+      return `<tr><td><strong>${readableDate(dateKey)}</strong><small>${integer(dayTotal.orders)} 单 · ¥${money(dayTotal.commission)}</small></td>${sorted.map((source) => {
+        const current = sourceMetricsOnDate(source, dateKey);
+        const signal = activitySignal(source, dateKey, current);
+        return `<td class="matrix-value ${signal.tone}" title="${escapeHtml(signal.note)}"><b>${integer(current.orders)} 单</b><strong>¥ ${money(current.commission)}</strong><small>${signal.label}</small></td>`;
+      }).join("")}</tr>`;
+    }).join("");
+    body.innerHTML = totalRow + dayRows;
+  }
+
   function renderDailyKpis(sources, dates) {
     const grid = document.getElementById("dailyKpis");
     if (!grid) return;
@@ -951,6 +1033,7 @@
       body.innerHTML = '<tr><td colspan="8"><div class="table-empty">当前筛选下暂无每日数据</div></td></tr>';
       return;
     }
+    const sorted = sortedDailySources(sources, dates);
     body.innerHTML = dates.map((dateKey) => {
       const expanded = state.expandedDates.has(dateKey);
       const total = metricsForDate(sources, dateKey);
@@ -959,12 +1042,6 @@
       const active = sources.filter((source) => sourceMetricsOnDate(source, dateKey).orders > 0).length;
       const dayTone = dayGrowth === null || Math.abs(dayGrowth) < 30 ? "steady" : dayGrowth >= 30 ? "surge" : "drop";
       const dayLabel = dayGrowth === null ? "新增" : `${dayGrowth > 0 ? "+" : ""}${dayGrowth.toFixed(1)}%`;
-      const sorted = [...sources].sort((left, right) => {
-        const leftMetrics = sourceMetricsOnDate(left, dateKey);
-        const rightMetrics = sourceMetricsOnDate(right, dateKey);
-        const key = state.dailySort === "commission" ? "commission" : "orders";
-        return rightMetrics[key] - leftMetrics[key] || rightMetrics.orders - leftMetrics.orders;
-      });
       const detailRows = expanded ? sorted.map((source) => {
         const current = sourceMetricsOnDate(source, dateKey);
         const prior = sourceMetricsOnDate(source, shiftDateKey(dateKey, -1));
@@ -1001,9 +1078,13 @@
   function renderDailyView() {
     const sources = dailyPromotionSources();
     const dates = dailyDateKeys(sources);
+    const sortFeedback = document.getElementById("dailySortFeedback");
+    if (sortFeedback) sortFeedback.textContent = `推广位列按所选范围${state.dailySort === "commission" ? "佣金" : "订单"}从高到低排列`;
     renderDailyKpis(sources, dates);
     renderDailyInsights(sources, dates);
+    renderDailyMatrix(sources, dates);
     renderDailyTable();
+    renderDailyLayoutVisibility();
   }
 
   function renderKpis() {
