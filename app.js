@@ -36,6 +36,13 @@
     period: "30d",
     trendMetric: "orders",
     peakSegment: "weekday",
+    view: "overview",
+    dailyRange: 14,
+    dailyChannel: "小红书",
+    dailySearch: "",
+    dailySort: "orders",
+    expandedDates: new Set(),
+    dailyExpansionReady: false,
     search: "",
     timer: null,
   };
@@ -269,6 +276,17 @@
           </div>
         </header>
 
+        <nav class="view-switch" aria-label="看板界面切换">
+          <button data-view="overview" class="active">
+            <span>总</span><div><strong>经营看板</strong><small>趋势、预测与排名</small></div>
+          </button>
+          <button data-view="daily">
+            <span>日</span><div><strong>每日明细</strong><small>逐日查看推广位变化</small></div>
+          </button>
+        </nav>
+
+        <div class="dashboard-view" id="overviewView">
+
         <section class="toolbar" aria-label="数据筛选">
           <div class="segmented channel-tabs">
             ${["全部", "小红书", "企业微信"].map((value) => `
@@ -376,6 +394,72 @@
           <div id="reconcileBox"></div>
         </section>
 
+        </div>
+
+        <section class="dashboard-view daily-view hidden" id="dailyView" aria-labelledby="dailyViewTitle">
+          <div class="daily-intro">
+            <div>
+              <p class="panel-kicker">推广位逐日追踪</p>
+              <h2 id="dailyViewTitle">每日订单与佣金明细</h2>
+              <p>按日期展开每个推广位，观察出单、佣金及活动放量或回落。</p>
+            </div>
+            <div class="daily-filter-stack">
+              <div class="segmented daily-range-tabs" aria-label="每日明细时间范围">
+                ${[[7, "近 7 天"], [14, "近 14 天"], [30, "近 30 天"]].map(([value, label]) => `
+                  <button data-daily-range="${value}" class="${value === 14 ? "active" : ""}">${label}</button>
+                `).join("")}
+              </div>
+              <label class="search-box daily-search">
+                <span aria-hidden="true">⌕</span>
+                <input id="dailySearch" placeholder="搜索推广位" aria-label="搜索每日推广位">
+              </label>
+            </div>
+          </div>
+
+          <section class="daily-control-row panel" aria-label="每日明细筛选">
+            <div>
+              <span>渠道</span>
+              <div class="segmented compact-segmented">
+                ${["全部", "小红书", "企业微信"].map((value) => `<button data-daily-channel="${value}" class="${value === "小红书" ? "active" : ""}">${value}</button>`).join("")}
+              </div>
+            </div>
+            <div>
+              <span>推广位排序</span>
+              <div class="segmented compact-segmented">
+                <button data-daily-sort="orders" class="active">按订单</button>
+                <button data-daily-sort="commission">按佣金</button>
+              </div>
+            </div>
+            <small>日期从新到旧排列，点击日期可展开或收起</small>
+          </section>
+
+          <section class="daily-kpi-grid" id="dailyKpis" aria-label="每日明细汇总"></section>
+
+          <section class="panel daily-insight-panel">
+            <div class="panel-head">
+              <div><p class="panel-kicker">辅助观察</p><h2>推广位变化提示</h2></div>
+              <span class="daily-scope" id="dailyScope"></span>
+            </div>
+            <div class="daily-insight-grid" id="dailyInsights"></div>
+          </section>
+
+          <section class="panel daily-table-panel">
+            <div class="panel-head daily-table-head">
+              <div>
+                <p class="panel-kicker">逐日明细</p>
+                <h2>日期 × 推广位数据表</h2>
+              </div>
+              <div class="signal-legend"><span class="surge">放量</span><span class="drop">回落</span><span class="new">新增</span><span class="steady">平稳</span></div>
+            </div>
+            <div class="table-wrap daily-table-wrap">
+              <table class="daily-data-table">
+                <thead><tr><th>日期 / 推广位</th><th>渠道</th><th>有效订单</th><th>成交金额</th><th>预估佣金</th><th>佣金率</th><th>日环比</th><th>变化信号</th></tr></thead>
+                <tbody id="dailyTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
         <footer>
           <div><span class="live-dot"></span> 数据来自云瞻公开推广看板 · 每 5 分钟自动刷新</div>
           <span>统计口径：有效下单 / 有效预估佣金 / 有效成交金额</span>
@@ -394,6 +478,13 @@
   }
 
   function bindDashboardControls() {
+    document.querySelectorAll("[data-view]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.view = button.dataset.view;
+        renderViewVisibility();
+        if (state.view === "daily") renderDailyView();
+      });
+    });
     document.querySelectorAll("[data-channel]").forEach((button) => {
       button.addEventListener("click", () => {
         state.channel = button.dataset.channel;
@@ -434,12 +525,51 @@
       state.search = event.target.value;
       renderRanking();
     });
+    document.querySelectorAll("[data-daily-range]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.dailyRange = number(button.dataset.dailyRange);
+        document.querySelectorAll("[data-daily-range]").forEach((item) => item.classList.toggle("active", item === button));
+        state.expandedDates.clear();
+        state.dailyExpansionReady = false;
+        renderDailyView();
+      });
+    });
+    document.querySelectorAll("[data-daily-channel]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.dailyChannel = button.dataset.dailyChannel;
+        document.querySelectorAll("[data-daily-channel]").forEach((item) => item.classList.toggle("active", item === button));
+        state.expandedDates.clear();
+        state.dailyExpansionReady = false;
+        renderDailyView();
+      });
+    });
+    document.querySelectorAll("[data-daily-sort]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.dailySort = button.dataset.dailySort;
+        document.querySelectorAll("[data-daily-sort]").forEach((item) => item.classList.toggle("active", item === button));
+        renderDailyTable();
+      });
+    });
+    document.getElementById("dailySearch")?.addEventListener("input", (event) => {
+      state.dailySearch = event.target.value;
+      state.expandedDates.clear();
+      state.dailyExpansionReady = false;
+      renderDailyView();
+    });
     document.getElementById("refreshButton")?.addEventListener("click", () => {
       void refreshData();
     });
     document.getElementById("rankingBody")?.addEventListener("click", (event) => {
       const button = event.target.closest("[data-detail-id]");
       if (button) openPromotionDetail(button.dataset.detailId);
+    });
+    document.getElementById("dailyTableBody")?.addEventListener("click", (event) => {
+      const toggle = event.target.closest("[data-date-toggle]");
+      if (!toggle) return;
+      const date = toggle.dataset.dateToggle;
+      if (state.expandedDates.has(date)) state.expandedDates.delete(date);
+      else state.expandedDates.add(date);
+      renderDailyTable();
     });
   }
 
@@ -662,6 +792,7 @@
   }
 
   function renderAll() {
+    renderViewVisibility();
     renderError();
     renderKpis();
     renderTrend();
@@ -669,7 +800,19 @@
     renderRanking();
     renderForecast();
     renderOrderPeaks();
+    renderDailyView();
     setSyncState();
+  }
+
+  function renderViewVisibility() {
+    const overview = document.getElementById("overviewView");
+    const daily = document.getElementById("dailyView");
+    if (!overview || !daily) return;
+    overview.classList.toggle("hidden", state.view !== "overview");
+    daily.classList.toggle("hidden", state.view !== "daily");
+    document.querySelectorAll("[data-view]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.view === state.view);
+    });
   }
 
   function renderError() {
@@ -677,6 +820,190 @@
     if (!banner) return;
     banner.textContent = state.error;
     banner.classList.toggle("hidden", !state.error);
+  }
+
+  function shiftDateKey(dateKey, days) {
+    const date = new Date(`${dateKey}T00:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString().slice(0, 10);
+  }
+
+  function readableDate(dateKey) {
+    const date = new Date(`${dateKey}T00:00:00Z`);
+    const weekday = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][date.getUTCDay()];
+    return `${shortDateLabel(dateKey)} · ${weekday}`;
+  }
+
+  function dailyPromotionSources() {
+    const query = state.dailySearch.trim().toLowerCase();
+    return (state.data?.sources || []).filter((source) =>
+      source.kind === "promotion"
+      && (state.dailyChannel === "全部" || source.channel === state.dailyChannel)
+      && (!query || `${source.channel}${source.promotion}`.toLowerCase().includes(query)));
+  }
+
+  function dailyDateKeys(sources) {
+    return [...new Set(sources.flatMap((source) => source.daily.map((row) => row.date)))]
+      .sort((left, right) => right.localeCompare(left))
+      .slice(0, state.dailyRange);
+  }
+
+  function sourceMetricsOnDate(source, dateKey) {
+    const row = source.daily.find((item) => item.date === dateKey);
+    return row ? { orders: number(row.orders), commission: number(row.commission), gmv: number(row.gmv) } : zeroMetrics();
+  }
+
+  function metricsForDate(sources, dateKey) {
+    return sources.reduce((total, source) => addMetrics(total, sourceMetricsOnDate(source, dateKey)), zeroMetrics());
+  }
+
+  function metricsForDates(source, dates) {
+    return dates.reduce((total, dateKey) => addMetrics(total, sourceMetricsOnDate(source, dateKey)), zeroMetrics());
+  }
+
+  function activitySignal(source, dateKey, current) {
+    const history = Array.from({ length: 7 }, (_, index) => sourceMetricsOnDate(source, shiftDateKey(dateKey, -(index + 1))));
+    const averageOrders = history.reduce((sum, item) => sum + item.orders, 0) / 7;
+    const rate = current.gmv ? (current.commission / current.gmv) * 100 : 0;
+    if (current.orders > 0 && averageOrders === 0) return { tone: "new", label: "新增出单", note: "前 7 天无订单" };
+    if (current.orders >= Math.max(3, averageOrders * 1.8)) return { tone: "surge", label: "明显放量", note: `高于前 7 天日均 ${averageOrders ? Math.round(((current.orders / averageOrders) - 1) * 100) : 0}%` };
+    if (averageOrders >= 2 && current.orders <= averageOrders * .45) return { tone: "drop", label: "明显回落", note: `前 7 天日均 ${averageOrders.toFixed(1)} 单` };
+    if (current.orders > 0 && rate >= 8) return { tone: "high", label: "高佣表现", note: `佣金率 ${rate.toFixed(1)}%` };
+    if (current.orders > 0) return { tone: "steady", label: "相对平稳", note: `前 7 天日均 ${averageOrders.toFixed(1)} 单` };
+    return { tone: "none", label: "暂无订单", note: "当日未出单" };
+  }
+
+  function trendMiniBars(source, dateKey) {
+    const values = Array.from({ length: 7 }, (_, index) => sourceMetricsOnDate(source, shiftDateKey(dateKey, index - 6)).orders);
+    const maximum = Math.max(...values, 1);
+    return `<span class="mini-trend" title="截至当日近 7 天订单：${values.join("、")}">${values.map((value) => `<i style="height:${Math.max(value ? 18 : 4, (value / maximum) * 100)}%"></i>`).join("")}</span>`;
+  }
+
+  function dailyRangeStats(sources, dates) {
+    return sources.map((source) => ({ ...source, rangeMetrics: metricsForDates(source, dates) }));
+  }
+
+  function renderDailyKpis(sources, dates) {
+    const grid = document.getElementById("dailyKpis");
+    if (!grid) return;
+    const rows = dailyRangeStats(sources, dates);
+    const total = rows.reduce((sum, row) => addMetrics(sum, row.rangeMetrics), zeroMetrics());
+    const active = rows.filter((row) => row.rangeMetrics.orders > 0).length;
+    const dailyAverage = dates.length ? total.orders / dates.length : 0;
+    const items = [
+      ["推广位有效订单", `${integer(total.orders)} 笔`, `${integer(active)} 个推广位出单`, "blue"],
+      ["推广位预估佣金", `¥ ${money(total.commission)}`, `${dates.length} 个自然日`, "red"],
+      ["日均订单", `${dailyAverage.toFixed(1)} 笔`, "用于识别整体节奏变化", "green"],
+      ["综合佣金率", total.gmv ? `${((total.commission / total.gmv) * 100).toFixed(2)}%` : "0.00%", `成交 ¥${money(total.gmv)}`, "gold"],
+    ];
+    grid.innerHTML = items.map(([label, value, note, tone]) => `
+      <article class="daily-kpi ${tone}"><span>${label}</span><strong>${value}</strong><small>${note}</small></article>
+    `).join("");
+  }
+
+  function renderDailyInsights(sources, dates) {
+    const grid = document.getElementById("dailyInsights");
+    const scope = document.getElementById("dailyScope");
+    if (!grid || !scope) return;
+    scope.textContent = `${state.dailyChannel} · ${dates.length ? `${shortDateLabel(dates.at(-1))}—${shortDateLabel(dates[0])}` : "暂无数据"}`;
+    if (!sources.length || !dates.length) {
+      grid.innerHTML = '<div class="daily-empty">当前筛选下暂无推广位数据</div>';
+      return;
+    }
+    const rangeRows = dailyRangeStats(sources, dates);
+    const topCommission = [...rangeRows].sort((a, b) => b.rangeMetrics.commission - a.rangeMetrics.commission)[0];
+    const topRate = [...rangeRows].filter((row) => row.rangeMetrics.gmv > 0)
+      .sort((a, b) => (b.rangeMetrics.commission / b.rangeMetrics.gmv) - (a.rangeMetrics.commission / a.rangeMetrics.gmv))[0];
+    const latestDate = dates[0];
+    const growthRows = sources.map((source) => {
+      const recentDates = Array.from({ length: 7 }, (_, index) => shiftDateKey(latestDate, -index));
+      const priorDates = Array.from({ length: 7 }, (_, index) => shiftDateKey(latestDate, -(index + 7)));
+      const recent = metricsForDates(source, recentDates);
+      const prior = metricsForDates(source, priorDates);
+      return { source, recent, prior, growth: ratio(recent.orders, prior.orders) };
+    }).filter((row) => row.recent.orders >= 3 && row.growth !== null)
+      .sort((a, b) => b.growth - a.growth);
+    const fastest = growthRows[0];
+    const latestSignals = sources.map((source) => ({ source, current: sourceMetricsOnDate(source, latestDate) }))
+      .map((item) => ({ ...item, signal: activitySignal(item.source, latestDate, item.current) }));
+    const alertCount = latestSignals.filter((item) => ["surge", "drop", "new"].includes(item.signal.tone)).length;
+    const items = [
+      ["近 7 天增长最快", fastest?.source.promotion || "暂无可比数据", fastest ? `${fastest.growth >= 0 ? "+" : ""}${fastest.growth.toFixed(1)}% · ${integer(fastest.recent.orders)} 单` : "需继续积累订单", "growth"],
+      ["范围内佣金贡献最高", topCommission?.promotion || "暂无数据", topCommission ? `¥${money(topCommission.rangeMetrics.commission)} · ${integer(topCommission.rangeMetrics.orders)} 单` : "—", "commission"],
+      ["范围内佣金率最高", topRate?.promotion || "暂无数据", topRate ? `${((topRate.rangeMetrics.commission / topRate.rangeMetrics.gmv) * 100).toFixed(2)}% · 成交 ¥${money(topRate.rangeMetrics.gmv)}` : "—", "rate"],
+      ["最近一天变化提醒", `${integer(alertCount)} 个推广位`, alertCount ? "展开最近日期查看放量、回落或新增" : "整体未见明显异常", "alert"],
+    ];
+    grid.innerHTML = items.map(([label, value, note, tone]) => `
+      <article class="daily-insight ${tone}"><span>${label}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></article>
+    `).join("");
+  }
+
+  function renderDailyTable() {
+    const body = document.getElementById("dailyTableBody");
+    if (!body) return;
+    const sources = dailyPromotionSources();
+    const dates = dailyDateKeys(sources);
+    if (!state.dailyExpansionReady) {
+      if (dates[0]) state.expandedDates.add(dates[0]);
+      state.dailyExpansionReady = true;
+    }
+    if (!sources.length || !dates.length) {
+      body.innerHTML = '<tr><td colspan="8"><div class="table-empty">当前筛选下暂无每日数据</div></td></tr>';
+      return;
+    }
+    body.innerHTML = dates.map((dateKey) => {
+      const expanded = state.expandedDates.has(dateKey);
+      const total = metricsForDate(sources, dateKey);
+      const previous = metricsForDate(sources, shiftDateKey(dateKey, -1));
+      const dayGrowth = ratio(total.orders, previous.orders);
+      const active = sources.filter((source) => sourceMetricsOnDate(source, dateKey).orders > 0).length;
+      const dayTone = dayGrowth === null || Math.abs(dayGrowth) < 30 ? "steady" : dayGrowth >= 30 ? "surge" : "drop";
+      const dayLabel = dayGrowth === null ? "新增" : `${dayGrowth > 0 ? "+" : ""}${dayGrowth.toFixed(1)}%`;
+      const sorted = [...sources].sort((left, right) => {
+        const leftMetrics = sourceMetricsOnDate(left, dateKey);
+        const rightMetrics = sourceMetricsOnDate(right, dateKey);
+        const key = state.dailySort === "commission" ? "commission" : "orders";
+        return rightMetrics[key] - leftMetrics[key] || rightMetrics.orders - leftMetrics.orders;
+      });
+      const detailRows = expanded ? sorted.map((source) => {
+        const current = sourceMetricsOnDate(source, dateKey);
+        const prior = sourceMetricsOnDate(source, shiftDateKey(dateKey, -1));
+        const change = ratio(current.orders, prior.orders);
+        const signal = activitySignal(source, dateKey, current);
+        const changeText = change === null ? (current.orders ? "新增" : "—") : `${change > 0 ? "+" : ""}${change.toFixed(1)}%`;
+        const changeTone = change > 0 ? "up" : change < 0 ? "down" : "flat";
+        return `
+          <tr class="daily-promotion-row">
+            <td><div class="daily-promotion"><span class="${source.channel === "小红书" ? "xhs-bg" : "wecom-bg"}">${source.channel === "小红书" ? "小" : "企"}</span><div><strong>${escapeHtml(source.promotion)}</strong>${trendMiniBars(source, dateKey)}</div></div></td>
+            <td><small class="daily-channel-label">${escapeHtml(source.channel)}</small></td>
+            <td><b>${integer(current.orders)}</b></td>
+            <td>¥ ${money(current.gmv)}</td>
+            <td><strong class="daily-commission">¥ ${money(current.commission)}</strong></td>
+            <td>${current.gmv ? `${((current.commission / current.gmv) * 100).toFixed(2)}%` : "—"}</td>
+            <td><span class="daily-change ${changeTone}">${changeText}</span></td>
+            <td><span class="activity-signal ${signal.tone}" title="${escapeHtml(signal.note)}">${signal.label}</span></td>
+          </tr>`;
+      }).join("") : "";
+      return `
+        <tr class="daily-date-row ${expanded ? "expanded" : ""}">
+          <td><button type="button" data-date-toggle="${dateKey}" aria-expanded="${expanded}"><i>${expanded ? "−" : "+"}</i><span><strong>${readableDate(dateKey)}</strong><small>${expanded ? "收起推广位" : "展开全部推广位"}</small></span></button></td>
+          <td><span class="daily-summary-label">日汇总 · ${integer(active)} 个出单</span></td>
+          <td><b>${integer(total.orders)}</b></td>
+          <td>¥ ${money(total.gmv)}</td>
+          <td><strong class="daily-commission">¥ ${money(total.commission)}</strong></td>
+          <td>${total.gmv ? `${((total.commission / total.gmv) * 100).toFixed(2)}%` : "—"}</td>
+          <td><span class="daily-change ${dayTone === "surge" ? "up" : dayTone === "drop" ? "down" : "flat"}">${dayLabel}</span></td>
+          <td><span class="activity-signal ${dayTone}">${dayTone === "surge" ? "整体放量" : dayTone === "drop" ? "整体回落" : "整体平稳"}</span></td>
+        </tr>${detailRows}`;
+    }).join("");
+  }
+
+  function renderDailyView() {
+    const sources = dailyPromotionSources();
+    const dates = dailyDateKeys(sources);
+    renderDailyKpis(sources, dates);
+    renderDailyInsights(sources, dates);
+    renderDailyTable();
   }
 
   function renderKpis() {
