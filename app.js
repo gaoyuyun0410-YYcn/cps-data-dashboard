@@ -1025,8 +1025,8 @@
     if (!body) return;
     const sources = dailyPromotionSources();
     const dates = dailyDateKeys(sources);
-    if (!state.dailyExpansionReady) {
-      if (dates[0]) state.expandedDates.add(dates[0]);
+    if (!state.dailyExpansionReady && dates[0]) {
+      state.expandedDates.add(dates[0]);
       state.dailyExpansionReady = true;
     }
     if (!sources.length || !dates.length) {
