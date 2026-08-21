@@ -424,14 +424,19 @@ td b { color: var(--ink); font-size: 13px; }
 .signal-legend { display: flex; gap: 5px; }
 .signal-legend span { padding: 4px 7px; border-radius: 20px; font-size: 8px; font-weight: 700; }
 .signal-legend .surge { background: #eaf8f1; color: #118252; }.signal-legend .drop { background: #fff0ee; color: #d13b31; }.signal-legend .new { background: #edf3ff; color: #315fc5; }.signal-legend .steady { background: #f0f2f4; color: #727c89; }
-.matrix-scroll-controls { display: flex; align-items: center; gap: 6px; }
-.matrix-scroll-controls span { color: #8992a0; font-size: 8px; white-space: nowrap; }
-.matrix-scroll-controls button { display: grid; width: 27px; height: 27px; place-items: center; border: 1px solid #dfe4eb; border-radius: 8px; background: #fff; color: #536174; font-size: 12px; cursor: pointer; box-shadow: 0 2px 7px rgba(23, 33, 45, .04); }
-.matrix-scroll-controls button:hover { border-color: #c9d6fc; background: #f4f7ff; color: var(--blue); }
+.matrix-scroll-controls { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #c9d7ff; border-radius: 13px; background: linear-gradient(135deg, #f3f6ff, #e9f0ff); box-shadow: 0 6px 18px rgba(40, 93, 255, .13); }
+.matrix-scroll-controls span { display: flex; flex-direction: column; gap: 2px; color: #315fc5; white-space: nowrap; }
+.matrix-scroll-controls span strong { font-size: 10px; font-weight: 850; }
+.matrix-scroll-controls span small { color: #6f7fa8; font-size: 8px; }
+.matrix-scroll-controls button { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 10px; background: var(--blue); color: #fff; font-size: 17px; font-weight: 800; cursor: pointer; box-shadow: 0 5px 12px rgba(40, 93, 255, .28); transition: transform .15s ease, box-shadow .15s ease; }
+.matrix-scroll-controls button:hover { transform: translateY(-1px); box-shadow: 0 7px 16px rgba(40, 93, 255, .36); }
+.matrix-scroll-controls button:active { transform: translateY(1px); }
+.matrix-scroll-controls button:last-child { animation: matrix-nudge 1.8s ease-in-out 2; }
+@keyframes matrix-nudge { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(3px); } }
 .daily-matrix-wrap { width: 100%; max-height: 720px; overflow: auto; border-top: 1px solid #edf0f2; scrollbar-gutter: stable; }
-.daily-matrix-wrap::-webkit-scrollbar { width: 10px; height: 11px; }
+.daily-matrix-wrap::-webkit-scrollbar { width: 11px; height: 15px; }
 .daily-matrix-wrap::-webkit-scrollbar-track { background: #f1f3f6; }
-.daily-matrix-wrap::-webkit-scrollbar-thumb { border: 2px solid #f1f3f6; border-radius: 10px; background: #aab5c4; }
+.daily-matrix-wrap::-webkit-scrollbar-thumb { border: 3px solid #f1f3f6; border-radius: 12px; background: #5f80ec; }
 .daily-matrix-table { width: max-content; min-width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
 .daily-matrix-table th, .daily-matrix-table td { width: 158px; min-width: 158px; max-width: 158px; padding: 11px 12px; border-top: 1px solid #edf0f2; border-left: 1px solid #f0f2f4; vertical-align: middle; white-space: normal; }
 .daily-matrix-table thead { position: sticky; z-index: 5; top: 0; }

@@ -461,7 +461,7 @@
                 <div class="signal-legend"><span class="surge">放量</span><span class="drop">回落</span><span class="new">新增</span><span class="steady">平稳</span></div>
                 <div class="matrix-scroll-controls" id="matrixScrollControls">
                   <button type="button" data-matrix-scroll="-1" aria-label="向左查看更多推广位">←</button>
-                  <span>左右滑动查看全部推广位</span>
+                  <span><strong>还有更多推广位</strong><small>点击箭头或拖动下方蓝色滚动条</small></span>
                   <button type="button" data-matrix-scroll="1" aria-label="向右查看更多推广位">→</button>
                 </div>
               </div>
