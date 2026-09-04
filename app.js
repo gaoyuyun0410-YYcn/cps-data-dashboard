@@ -16,6 +16,7 @@
     ["7d", "近 7 天"],
     ["30d", "近 30 天"],
     ["month", "本月"],
+    ["lastMonth", "上月"],
     ["all", "累计"],
   ];
   const metricOptions = [
@@ -618,15 +619,33 @@
     return target;
   }
 
+  function monthKey(monthOffset = 0) {
+    const [year, month] = shanghaiDateKey().split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1 - monthOffset, 1)).toISOString().slice(0, 7);
+  }
+
+  function monthBounds(monthOffset = 0) {
+    const key = monthKey(monthOffset);
+    const [year, month] = key.split("-").map(Number);
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return { start: `${key}-01`, end: `${key}-${String(lastDay).padStart(2, "0")}` };
+  }
+
+  function completeMonthAvailable(sources, monthOffset = 0) {
+    if (!sources.length) return false;
+    const { start, end } = monthBounds(monthOffset);
+    return sources.every((source) => {
+      const dates = new Set(source.daily.map((row) => row.date));
+      return dates.has(start) && dates.has(end);
+    });
+  }
+
   function dailyRowsForPeriod(source, period, offset = 0) {
     const rows = [...source.daily].sort((left, right) => right.date.localeCompare(left.date));
     if (period === "today") return rows.filter((row) => row.date === shanghaiDateKey(-offset));
     if (period === "yesterday") return rows.filter((row) => row.date === shanghaiDateKey(-(offset + 1)));
-    if (period === "month") {
-      const [year, month] = shanghaiDateKey().split("-");
-      const prefix = `${year}-${month}-`;
-      return rows.filter((row) => row.date.startsWith(prefix));
-    }
+    if (period === "month") return rows.filter((row) => row.date.startsWith(`${monthKey(offset)}-`));
+    if (period === "lastMonth") return rows.filter((row) => row.date.startsWith(`${monthKey(offset + 1)}-`));
     const days = period === "7d" ? 7 : 30;
     return rows.slice(offset, offset + days);
   }
@@ -714,7 +733,11 @@
     if (state.period === "today") previous = aggregate(totals, "today", 1);
     if (state.period === "yesterday") previous = aggregate(totals, "today", 2);
     if (state.period === "7d") previous = aggregate(totals, "7d", 7);
-    return { visible, totals, current, previous };
+    if (state.period === "lastMonth") previous = aggregate(totals, "lastMonth", 1);
+    const periodComplete = state.period !== "lastMonth" || completeMonthAvailable(totals, 1);
+    const comparisonAvailable = state.period !== "lastMonth"
+      || (periodComplete && completeMonthAvailable(totals, 2));
+    return { visible, totals, current, previous, periodComplete, comparisonAvailable };
   }
 
   async function fetchSource(source) {
@@ -1090,11 +1113,18 @@
   function renderKpis() {
     const grid = document.getElementById("kpiGrid");
     if (!grid) return;
-    const { current, previous } = dashboardMetrics();
-    const canCompare = state.period === "today" || state.period === "yesterday" || state.period === "7d";
+    const { current, previous, periodComplete, comparisonAvailable } = dashboardMetrics();
+    const canCompare = state.period === "today"
+      || state.period === "yesterday"
+      || state.period === "7d"
+      || (state.period === "lastMonth" && comparisonAvailable);
     const compareLabel = state.period === "today"
       ? "较昨日"
-      : state.period === "yesterday" ? "较前日" : "较前 7 天";
+      : state.period === "yesterday" ? "较前日"
+        : state.period === "lastMonth" ? "较前月" : "较前 7 天";
+    const neutralLabel = state.period === "lastMonth"
+      ? (periodComplete ? "上月完整自然月" : "上月当前可见部分")
+      : "按当前筛选范围统计";
     const kpis = [
       ["有效订单", `${integer(current.orders)} 笔`, ratio(current.orders, previous.orders), "blue"],
       ["预估佣金", `¥ ${money(current.commission)}`, ratio(current.commission, previous.commission), "red"],
@@ -1105,7 +1135,7 @@
     grid.innerHTML = kpis.map(([label, value, comparison, tone]) => {
       const comparisonHtml = canCompare && comparison !== null
         ? `<span class="${comparison >= 0 ? "up" : "down"}">${comparison >= 0 ? "↑" : "↓"} ${Math.abs(comparison).toFixed(1)}%<em>${compareLabel}</em></span>`
-        : '<span class="neutral">按当前筛选范围统计</span>';
+        : `<span class="neutral">${neutralLabel}</span>`;
       return `
         <article class="kpi-card ${tone}">
           <div class="kpi-heading"><span>${label}</span><i aria-hidden="true"></i></div>
@@ -1545,10 +1575,9 @@
     let dates;
     if (state.period === "today") dates = allDates.filter((date) => date === shanghaiDateKey());
     else if (state.period === "yesterday") dates = allDates.filter((date) => date === shanghaiDateKey(-1));
-    else if (state.period === "month") {
-      const [year, month] = shanghaiDateKey().split("-");
-      dates = allDates.filter((date) => date.startsWith(`${year}-${month}-`));
-    } else {
+    else if (state.period === "month") dates = allDates.filter((date) => date.startsWith(`${monthKey()}-`));
+    else if (state.period === "lastMonth") dates = allDates.filter((date) => date.startsWith(`${monthKey(1)}-`));
+    else {
       const days = state.period === "7d" ? 7 : 30;
       dates = allDates.slice(0, days);
     }
@@ -1687,6 +1716,15 @@
     }
     if (state.period === "month") {
       return `<div class="growth-cell flat"><strong>本月累计</strong><small>${integer(metricsFor(source, "month").orders)} 单</small></div>`;
+    }
+    if (state.period === "lastMonth") {
+      const { totals } = dashboardMetrics();
+      const complete = completeMonthAvailable(totals, 1);
+      const comparable = complete && completeMonthAvailable(totals, 2);
+      if (comparable) {
+        return growthCell(metricsFor(source, "lastMonth").orders, metricsFor(source, "lastMonth", 1).orders);
+      }
+      return `<div class="growth-cell flat"><strong>${complete ? "上月累计" : "上月可见"}</strong><small>${integer(metricsFor(source, "lastMonth").orders)} 单</small></div>`;
     }
     return growthCell(metricsFor(source, "7d").orders, metricsFor(source, "7d", 7).orders);
   }

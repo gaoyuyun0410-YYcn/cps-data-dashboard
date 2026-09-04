@@ -758,7 +758,7 @@ footer .live-dot { width: 6px; height: 6px; box-shadow: none; }
   .toolbar { align-items: stretch; flex-direction: column; }
   .segmented { display: grid; width: 100%; }
   .channel-tabs { grid-template-columns: repeat(3, 1fr); }
-  .period-tabs { grid-template-columns: repeat(3, 1fr); }
+  .period-tabs { grid-template-columns: repeat(4, 1fr); }
   .segmented button { padding: 8px 5px; }
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
   .kpi-card { min-height: 124px; padding: 15px 13px; }
