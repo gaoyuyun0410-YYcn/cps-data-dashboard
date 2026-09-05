@@ -291,9 +291,9 @@
 
         <section class="toolbar" aria-label="数据筛选">
           <div class="segmented channel-tabs">
-            ${["全部", "小红书", "企业微信"].map((value) => `
+            ${["全部", ...configuredChannelNames("channel")].map((value) => `
               <button data-channel="${value}" class="${value === "全部" ? "active" : ""}">
-                ${value}${value === "全部" ? "" : `<span class="channel-mini-dot ${value === "小红书" ? "xhs" : "wecom"}"></span>`}
+                ${value}${value === "全部" ? "" : `<span class="channel-mini-dot ${channelVisual(value).dotClass}"></span>`}
               </button>
             `).join("")}
           </div>
@@ -422,7 +422,7 @@
             <div>
               <span>渠道</span>
               <div class="segmented compact-segmented">
-                ${["全部", "小红书", "企业微信"].map((value) => `<button data-daily-channel="${value}" class="${value === "小红书" ? "active" : ""}">${value}</button>`).join("")}
+                ${["全部", ...configuredChannelNames("promotion")].map((value) => `<button data-daily-channel="${value}" class="${value === "小红书" ? "active" : ""}">${value}</button>`).join("")}
               </div>
             </div>
             <div>
@@ -717,6 +717,19 @@
     } catch {
       return "#";
     }
+  }
+
+  function configuredChannelNames(kind) {
+    return [...new Set((state.config?.sources || [])
+      .filter((source) => !kind || source.kind === kind)
+      .map((source) => source.channel))];
+  }
+
+  function channelVisual(channel) {
+    if (channel === "小红书B组") return { className: "xhs-b-bg", dotClass: "xhs-b", label: "B" };
+    if (channel === "小红书C组") return { className: "xhs-c-bg", dotClass: "xhs-c", label: "C" };
+    if (channel.startsWith("小红书")) return { className: "xhs-bg", dotClass: "xhs", label: "小" };
+    return { className: "wecom-bg", dotClass: "wecom", label: "企" };
   }
 
   function selectedSources() {
@@ -1074,7 +1087,7 @@
         const changeTone = change > 0 ? "up" : change < 0 ? "down" : "flat";
         return `
           <tr class="daily-promotion-row">
-            <td><div class="daily-promotion"><span class="${source.channel === "小红书" ? "xhs-bg" : "wecom-bg"}">${source.channel === "小红书" ? "小" : "企"}</span><div><strong>${escapeHtml(source.promotion)}</strong>${trendMiniBars(source, dateKey)}</div></div></td>
+            <td><div class="daily-promotion"><span class="${channelVisual(source.channel).className}">${channelVisual(source.channel).label}</span><div><strong>${escapeHtml(source.promotion)}</strong>${trendMiniBars(source, dateKey)}</div></div></td>
             <td><small class="daily-channel-label">${escapeHtml(source.channel)}</small></td>
             <td><b>${integer(current.orders)}</b></td>
             <td>¥ ${money(current.gmv)}</td>
@@ -1629,15 +1642,17 @@
     const allSources = state.data?.sources || [];
     const successful = allSources.filter((source) => source.status === "ok").length;
     count.textContent = `${successful}/${allSources.length || state.config?.sources?.length || 14} 数据源正常`;
-    const { visible, current } = dashboardMetrics();
-    list.innerHTML = allSources.filter((source) => source.kind === "channel").map((source) => {
+    const { visible, totals, current } = dashboardMetrics();
+    const channelSources = allSources.filter((source) => source.kind === "channel"
+      && (state.channel === "全部" || source.channel === state.channel));
+    list.innerHTML = channelSources.map((source) => {
       const metrics = metricsFor(source, state.period);
       const share = current.orders && state.channel === "全部"
         ? (metrics.orders / current.orders) * 100
         : metrics.orders ? 100 : 0;
       return `
         <div class="channel-item">
-          <div class="channel-icon"><span class="${source.channel === "小红书" ? "xhs-bg" : "wecom-bg"}">${source.channel === "小红书" ? "小" : "企"}</span></div>
+          <div class="channel-icon"><span class="${channelVisual(source.channel).className}">${channelVisual(source.channel).label}</span></div>
           <div class="channel-copy">
             <div><strong>${escapeHtml(source.channel)}</strong><span>${integer(metrics.orders)} 笔</span></div>
             <div class="progress"><i style="width:${Math.max(share, metrics.orders ? 4 : 0)}%"></i></div>
@@ -1648,6 +1663,14 @@
     }).join("");
     const promotions = visible.filter((source) => source.kind === "promotion");
     const promotionMetrics = aggregate(promotions, state.period);
+    if (!promotions.length && totals.length) {
+      reconcileBox.innerHTML = `
+        <div class="reconcile info">
+          <span>i</span>
+          <div><strong>当前仅接入渠道总数据</strong><small>该分组的推广位明细后续接入后，将自动显示排名与明细</small></div>
+        </div>`;
+      return;
+    }
     const reconciled = Math.abs(promotionMetrics.orders - current.orders) < 0.001;
     reconcileBox.innerHTML = `
       <div class="reconcile ${reconciled ? "ok" : "warn"}">
@@ -1781,7 +1804,7 @@
       <section class="detail-dialog" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
         <header class="detail-head">
           <div class="detail-identity">
-            <span class="${source.channel === "小红书" ? "xhs-bg" : "wecom-bg"}">${source.channel === "小红书" ? "小" : "企"}</span>
+            <span class="${channelVisual(source.channel).className}">${channelVisual(source.channel).label}</span>
             <div>
               <p>${escapeHtml(source.channel)} · ${detailPeriodLabel()}</p>
               <h2 id="detailTitle">${escapeHtml(source.promotion)}</h2>
@@ -1848,7 +1871,7 @@
           <td><span class="rank-number rank-${index + 1}">${String(index + 1).padStart(2, "0")}</span></td>
           <td>
             <div class="promotion-name">
-              <span class="${row.channel === "小红书" ? "xhs-bg" : "wecom-bg"}">${row.channel === "小红书" ? "小" : "企"}</span>
+              <span class="${channelVisual(row.channel).className}">${channelVisual(row.channel).label}</span>
               <div><strong>${escapeHtml(row.promotion)}</strong><small>${escapeHtml(row.channel)}</small></div>
             </div>
           </td>

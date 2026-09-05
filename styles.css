@@ -177,6 +177,8 @@ h1 { margin: 0; font-size: 25px; line-height: 1.15; letter-spacing: -.03em; }
   vertical-align: 1px;
 }
 .channel-mini-dot.xhs { background: var(--red); }
+.channel-mini-dot.xhs-b { background: #f59e0b; }
+.channel-mini-dot.xhs-c { background: #7c5ce7; }
 .channel-mini-dot.wecom { background: var(--green); }
 
 .error-banner {
@@ -336,6 +338,8 @@ h1 { margin: 0; font-size: 25px; line-height: 1.15; letter-spacing: -.03em; }
 .channel-icon > span, .promotion-name > span { display: grid; place-items: center; color: white; font-weight: 800; }
 .channel-icon > span { width: 38px; height: 38px; border-radius: 12px; font-size: 13px; }
 .xhs-bg { background: linear-gradient(145deg, #ff6459, #e8372d); }
+.xhs-b-bg { background: linear-gradient(145deg, #ffbd45, #e88908); }
+.xhs-c-bg { background: linear-gradient(145deg, #9677ef, #6542cc); }
 .wecom-bg { background: linear-gradient(145deg, #35c983, #14965e); }
 .channel-copy { flex: 1; min-width: 0; }
 .channel-copy > div:first-child { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
@@ -347,6 +351,7 @@ h1 { margin: 0; font-size: 25px; line-height: 1.15; letter-spacing: -.03em; }
 .reconcile { display: flex; gap: 11px; margin-top: 30px; padding: 13px; border-radius: 12px; }
 .reconcile.ok { background: #f0faf5; color: #14734b; }
 .reconcile.warn { background: #fff7ed; color: #a45b10; }
+.reconcile.info { background: #edf3ff; color: #315fc5; }
 .reconcile > span { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: white; font-weight: 800; }
 .reconcile div { display: flex; flex-direction: column; gap: 3px; }
 .reconcile strong { font-size: 10px; }
