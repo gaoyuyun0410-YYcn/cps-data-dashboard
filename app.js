@@ -516,6 +516,16 @@
     void refreshData();
     clearInterval(state.timer);
     state.timer = window.setInterval(() => void refreshData(), REFRESH_MS);
+    window.removeEventListener("focus", refreshWhenReturning);
+    window.addEventListener("focus", refreshWhenReturning);
+    document.removeEventListener("visibilitychange", refreshWhenReturning);
+    document.addEventListener("visibilitychange", refreshWhenReturning);
+  }
+
+  function refreshWhenReturning() {
+    if (document.visibilityState === "hidden" || state.loading) return;
+    const lastUpdated = Date.parse(state.data?.refreshedAt || "");
+    if (!Number.isFinite(lastUpdated) || Date.now() - lastUpdated > 60 * 1000) void refreshData();
   }
 
   function bindDashboardControls() {
@@ -562,7 +572,8 @@
       const start = document.getElementById("customStart")?.value || "";
       const end = document.getElementById("customEnd")?.value || "";
       const hint = document.getElementById("customDateHint");
-      if (!start || !end || start > end) {
+      const { min, max } = availableDateBounds();
+      if (!start || !end || start > end || !min || !max || start < min || end > max) {
         if (hint) hint.textContent = "请选择正确的开始和结束日期";
         return;
       }
@@ -684,10 +695,8 @@
   function completeMonthAvailable(sources, monthOffset = 0) {
     if (!sources.length) return false;
     const { start, end } = monthBounds(monthOffset);
-    return sources.every((source) => {
-      const dates = new Set(source.daily.map((row) => row.date));
-      return dates.has(start) && dates.has(end);
-    });
+    const dates = new Set(sources.flatMap((source) => source.daily.map((row) => row.date)));
+    return dates.has(start) && dates.has(end);
   }
 
   function dailyRowsForPeriod(source, period, offset = 0) {
@@ -1703,15 +1712,28 @@
     }
     dates.reverse();
     title.textContent = state.period === "all"
-      ? `累计数据走势（已记录 ${dates.length} 天）`
+      ? `累计增长走势（已记录 ${dates.length} 天明细）`
       : `${currentPeriodLabel()}数据走势`;
-    const trend = dates.map((date) => ({
+    let trend = dates.map((date) => ({
       date,
       value: totals.reduce((sum, source) => {
         const row = source.daily.find((item) => item.date === date);
         return sum + (row?.[state.trendMetric] || 0);
       }, 0),
     }));
+    if (state.period === "all" && trend.length) {
+      const platformTotal = totals.reduce((sum, source) => sum + number(source.totals[state.trendMetric]), 0);
+      const recordedTotal = trend.reduce((sum, item) => sum + item.value, 0);
+      const historicalBase = Math.max(0, platformTotal - recordedTotal);
+      let running = historicalBase;
+      const cumulative = trend.map((item) => {
+        running += item.value;
+        return { ...item, value: running };
+      });
+      trend = historicalBase > 0
+        ? [{ date: "历史基数", value: historicalBase, label: "基数" }, ...cumulative]
+        : cumulative;
+    }
     if (!trend.length) {
       const note = state.period === "lastMonth"
         ? "平台仅返回最近 30 天；看板已开始持续保存历史，后续月份将自动完整保留"
@@ -1729,9 +1751,9 @@
           <div class="grid-line top"></div><div class="grid-line middle"></div><div class="grid-line bottom"></div>
           ${trend.map((item, index) => {
             const height = Math.max((item.value / maximum) * 100, item.value ? 4 : 1);
-            const label = index % labelInterval === 0 || index === trend.length - 1
+            const label = item.label || (index % labelInterval === 0 || index === trend.length - 1
               ? item.date.slice(5).replace("-", ".")
-              : "";
+              : "");
             return `
               <div class="bar-column" title="${escapeHtml(item.date)}：${item.value}">
                 <div class="bar-track">
@@ -1865,6 +1887,9 @@
     }
     if (state.period === "custom") {
       return `<div class="growth-cell flat"><strong>区间累计</strong><small>${integer(metricsFor(source, "custom").orders)} 单</small></div>`;
+    }
+    if (state.period === "all") {
+      return `<div class="growth-cell flat"><strong>近 7 天趋势</strong><small>${integer(metricsFor(source, "7d").orders)} 单</small></div>`;
     }
     return growthCell(metricsFor(source, "7d").orders, metricsFor(source, "7d", 7).orders);
   }
