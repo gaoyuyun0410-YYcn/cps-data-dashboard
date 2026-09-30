@@ -35,6 +35,8 @@
     usingCache: false,
     channel: "全部",
     period: "30d",
+    customStart: "",
+    customEnd: "",
     trendMetric: "orders",
     peakSegment: "weekday",
     view: "overview",
@@ -302,6 +304,23 @@
               <button data-period="${value}" class="${value === "30d" ? "active" : ""}">${label}</button>
             `).join("")}
           </div>
+          <div class="custom-date-wrap">
+            <button class="custom-date-toggle" id="customDateToggle" type="button" aria-expanded="false">
+              <span>◫</span><b id="customDateLabel">自定义时间</b>
+            </button>
+            <div class="custom-date-panel hidden" id="customDatePanel">
+              <div class="custom-date-fields">
+                <label>开始日期<input type="date" id="customStart"></label>
+                <i>至</i>
+                <label>结束日期<input type="date" id="customEnd"></label>
+              </div>
+              <small id="customDateHint">请选择可用数据范围内的日期</small>
+              <div class="custom-date-actions">
+                <button type="button" id="customDateCancel">取消</button>
+                <button type="button" id="customDateApply">应用</button>
+              </div>
+            </div>
+          </div>
         </section>
 
         <div class="error-banner hidden" id="errorBanner"></div>
@@ -522,8 +541,39 @@
         document.querySelectorAll("[data-period]").forEach((item) => {
           item.classList.toggle("active", item === button);
         });
+        document.getElementById("customDateToggle")?.classList.remove("active");
+        document.getElementById("customDatePanel")?.classList.add("hidden");
         renderAll();
       });
+    });
+    const customToggle = document.getElementById("customDateToggle");
+    const customPanel = document.getElementById("customDatePanel");
+    customToggle?.addEventListener("click", () => {
+      const opening = customPanel?.classList.contains("hidden");
+      if (opening) prepareCustomDatePanel();
+      customPanel?.classList.toggle("hidden", !opening);
+      customToggle.setAttribute("aria-expanded", String(Boolean(opening)));
+    });
+    document.getElementById("customDateCancel")?.addEventListener("click", () => {
+      customPanel?.classList.add("hidden");
+      customToggle?.setAttribute("aria-expanded", "false");
+    });
+    document.getElementById("customDateApply")?.addEventListener("click", () => {
+      const start = document.getElementById("customStart")?.value || "";
+      const end = document.getElementById("customEnd")?.value || "";
+      const hint = document.getElementById("customDateHint");
+      if (!start || !end || start > end) {
+        if (hint) hint.textContent = "请选择正确的开始和结束日期";
+        return;
+      }
+      state.customStart = start;
+      state.customEnd = end;
+      state.period = "custom";
+      document.querySelectorAll("[data-period]").forEach((item) => item.classList.remove("active"));
+      customToggle?.classList.add("active");
+      customToggle?.setAttribute("aria-expanded", "false");
+      customPanel?.classList.add("hidden");
+      renderAll();
     });
     document.querySelectorAll("[data-metric]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -646,6 +696,9 @@
     if (period === "yesterday") return rows.filter((row) => row.date === shanghaiDateKey(-(offset + 1)));
     if (period === "month") return rows.filter((row) => row.date.startsWith(`${monthKey(offset)}-`));
     if (period === "lastMonth") return rows.filter((row) => row.date.startsWith(`${monthKey(offset + 1)}-`));
+    if (period === "custom") {
+      return rows.filter((row) => row.date >= state.customStart && row.date <= state.customEnd);
+    }
     const days = period === "7d" ? 7 : 30;
     return rows.slice(offset, offset + days);
   }
@@ -654,6 +707,38 @@
     if (period === "all") return offset === 0 ? { ...source.totals } : zeroMetrics();
     return dailyRowsForPeriod(source, period, offset)
       .reduce((sum, row) => addMetrics(sum, row), zeroMetrics());
+  }
+
+  function availableDateBounds() {
+    const sources = selectedSources().filter((source) => source.kind === "channel");
+    const dates = Array.from(new Set(sources.flatMap((source) => source.daily.map((row) => row.date)))).sort();
+    return { dates, min: dates[0] || "", max: dates[dates.length - 1] || "" };
+  }
+
+  function customPeriodLabel() {
+    if (!state.customStart || !state.customEnd) return "自定义时间";
+    return `${state.customStart.slice(5).replace("-", ".")}–${state.customEnd.slice(5).replace("-", ".")}`;
+  }
+
+  function currentPeriodLabel() {
+    return state.period === "custom"
+      ? customPeriodLabel()
+      : periodOptions.find(([key]) => key === state.period)?.[1] || "当前周期";
+  }
+
+  function prepareCustomDatePanel() {
+    const { dates, min, max } = availableDateBounds();
+    const start = document.getElementById("customStart");
+    const end = document.getElementById("customEnd");
+    const hint = document.getElementById("customDateHint");
+    if (!start || !end || !hint) return;
+    start.min = min;
+    start.max = max;
+    end.min = min;
+    end.max = max;
+    start.value = state.customStart || dates[Math.max(0, dates.length - 7)] || "";
+    end.value = state.customEnd || max;
+    hint.textContent = min && max ? `当前已记录 ${min} 至 ${max}` : "当前暂无可选历史数据";
   }
 
   function aggregate(sources, period, offset = 0) {
@@ -750,7 +835,9 @@
     const periodComplete = state.period !== "lastMonth" || completeMonthAvailable(totals, 1);
     const comparisonAvailable = state.period !== "lastMonth"
       || (periodComplete && completeMonthAvailable(totals, 2));
-    return { visible, totals, current, previous, periodComplete, comparisonAvailable };
+    const periodAvailable = state.period === "all"
+      || totals.some((source) => dailyRowsForPeriod(source, state.period).length > 0);
+    return { visible, totals, current, previous, periodComplete, comparisonAvailable, periodAvailable };
   }
 
   async function fetchSource(source) {
@@ -797,10 +884,26 @@
     state.usingCache = false;
     setSyncState();
     try {
+      if (!state.data) {
+        const cached = await loadEncryptedCache();
+        if (cached?.sources?.length) state.data = cached;
+      }
       const previous = new Map((state.data?.sources || []).map((source) => [source.id, source]));
       const settled = await Promise.allSettled(state.config.sources.map(fetchSource));
       const sources = settled.map((result, index) => {
-        if (result.status === "fulfilled") return result.value;
+        if (result.status === "fulfilled") {
+          const current = result.value;
+          const old = previous.get(current.id);
+          if (!old?.daily?.length) return current;
+          const merged = new Map(old.daily.map((row) => [row.date, row]));
+          current.daily.forEach((row) => merged.set(row.date, row));
+          return {
+            ...current,
+            daily: Array.from(merged.values())
+              .sort((left, right) => right.date.localeCompare(left.date))
+              .slice(0, 400),
+          };
+        }
         const definition = state.config.sources[index];
         const old = previous.get(definition.id);
         if (old?.status === "ok") {
@@ -873,6 +976,9 @@
     renderForecast();
     renderOrderPeaks();
     renderDailyView();
+    const customLabel = document.getElementById("customDateLabel");
+    if (customLabel) customLabel.textContent = state.period === "custom" ? customPeriodLabel() : "自定义时间";
+    document.getElementById("customDateToggle")?.classList.toggle("active", state.period === "custom");
     setSyncState();
   }
 
@@ -1126,7 +1232,7 @@
   function renderKpis() {
     const grid = document.getElementById("kpiGrid");
     if (!grid) return;
-    const { current, previous, periodComplete, comparisonAvailable } = dashboardMetrics();
+    const { current, previous, periodComplete, comparisonAvailable, periodAvailable } = dashboardMetrics();
     const canCompare = state.period === "today"
       || state.period === "yesterday"
       || state.period === "7d"
@@ -1136,7 +1242,7 @@
       : state.period === "yesterday" ? "较前日"
         : state.period === "lastMonth" ? "较前月" : "较前 7 天";
     const neutralLabel = state.period === "lastMonth"
-      ? (periodComplete ? "上月完整自然月" : "上月当前可见部分")
+      ? (periodAvailable ? (periodComplete ? "上月完整自然月" : "上月当前可见部分") : "历史将在后续刷新中持续补全")
       : "按当前筛选范围统计";
     const kpis = [
       ["有效订单", `${integer(current.orders)} 笔`, ratio(current.orders, previous.orders), "blue"],
@@ -1152,7 +1258,7 @@
       return `
         <article class="kpi-card ${tone}">
           <div class="kpi-heading"><span>${label}</span><i aria-hidden="true"></i></div>
-          <strong>${state.loading && !state.data ? "—" : value}</strong>
+          <strong>${state.loading && !state.data ? "—" : (!periodAvailable ? "暂无记录" : value)}</strong>
           <div class="kpi-foot">${comparisonHtml}</div>
         </article>
       `;
@@ -1582,7 +1688,6 @@
     const title = document.getElementById("trendTitle");
     if (!chart || !title) return;
     const { totals } = dashboardMetrics();
-    title.textContent = `${state.period === "all" ? "近 30 天" : periodOptions.find(([key]) => key === state.period)?.[1]}数据走势`;
     const allDates = Array.from(new Set(totals.flatMap((source) => source.daily.map((row) => row.date))))
       .sort((left, right) => right.localeCompare(left));
     let dates;
@@ -1590,11 +1695,16 @@
     else if (state.period === "yesterday") dates = allDates.filter((date) => date === shanghaiDateKey(-1));
     else if (state.period === "month") dates = allDates.filter((date) => date.startsWith(`${monthKey()}-`));
     else if (state.period === "lastMonth") dates = allDates.filter((date) => date.startsWith(`${monthKey(1)}-`));
+    else if (state.period === "custom") dates = allDates.filter((date) => date >= state.customStart && date <= state.customEnd);
+    else if (state.period === "all") dates = allDates;
     else {
       const days = state.period === "7d" ? 7 : 30;
       dates = allDates.slice(0, days);
     }
     dates.reverse();
+    title.textContent = state.period === "all"
+      ? `累计数据走势（已记录 ${dates.length} 天）`
+      : `${currentPeriodLabel()}数据走势`;
     const trend = dates.map((date) => ({
       date,
       value: totals.reduce((sum, source) => {
@@ -1603,13 +1713,17 @@
       }, 0),
     }));
     if (!trend.length) {
-      chart.innerHTML = '<div class="empty-chart"><b>暂无趋势数据</b><span>当前渠道还没有产生有效订单</span></div>';
+      const note = state.period === "lastMonth"
+        ? "平台仅返回最近 30 天；看板已开始持续保存历史，后续月份将自动完整保留"
+        : "当前筛选范围内还没有可用的每日数据";
+      chart.innerHTML = `<div class="empty-chart"><b>暂无趋势数据</b><span>${note}</span></div>`;
       return;
     }
     const maximum = Math.max(...trend.map((item) => item.value), 1);
     const labelInterval = Math.max(1, Math.ceil(trend.length / 8));
     chart.innerHTML = `
-      <div class="bar-chart" role="img" aria-label="每日数据柱状趋势图">
+      <div class="trend-chart-scroll">
+      <div class="bar-chart ${trend.length > 45 ? "long" : ""}" style="--bar-count:${trend.length}" role="img" aria-label="每日数据柱状趋势图">
         <div class="chart-scale"><span>${compact(maximum)}</span><span>${compact(maximum / 2)}</span><span>0</span></div>
         <div class="bars-area">
           <div class="grid-line top"></div><div class="grid-line middle"></div><div class="grid-line bottom"></div>
@@ -1630,7 +1744,7 @@
             `;
           }).join("")}
         </div>
-      </div>
+      </div></div>
     `;
   }
 
@@ -1749,12 +1863,15 @@
       }
       return `<div class="growth-cell flat"><strong>${complete ? "上月累计" : "上月可见"}</strong><small>${integer(metricsFor(source, "lastMonth").orders)} 单</small></div>`;
     }
+    if (state.period === "custom") {
+      return `<div class="growth-cell flat"><strong>区间累计</strong><small>${integer(metricsFor(source, "custom").orders)} 单</small></div>`;
+    }
     return growthCell(metricsFor(source, "7d").orders, metricsFor(source, "7d", 7).orders);
   }
 
   function detailPeriodLabel() {
-    if (state.period === "all") return "累计概览 · 每日明细展示近 30 天";
-    return `${periodOptions.find(([key]) => key === state.period)?.[1] || "当前周期"}明细`;
+    if (state.period === "all") return "累计概览 · 展示本设备已记录的全部历史";
+    return `${currentPeriodLabel()}明细`;
   }
 
   function closePromotionDetail() {
@@ -1775,7 +1892,7 @@
     const previous7 = metricsFor(source, "7d", 7);
     const growth = growthPresentation(current7.orders, previous7.orders);
     const daily = state.period === "all"
-      ? dailyRowsForPeriod(source, "30d")
+      ? [...source.daily].sort((left, right) => right.date.localeCompare(left.date))
       : dailyRowsForPeriod(source, state.period);
     const dailyRows = daily.length
       ? daily.map((row, index) => {
