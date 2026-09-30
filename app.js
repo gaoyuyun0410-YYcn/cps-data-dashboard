@@ -310,9 +310,9 @@
             </button>
             <div class="custom-date-panel hidden" id="customDatePanel">
               <div class="custom-date-fields">
-                <label>开始日期<input type="date" id="customStart"></label>
+                <label>开始日期<select id="customStart" aria-label="自定义开始日期"></select></label>
                 <i>至</i>
-                <label>结束日期<input type="date" id="customEnd"></label>
+                <label>结束日期<select id="customEnd" aria-label="自定义结束日期"></select></label>
               </div>
               <small id="customDateHint">请选择可用数据范围内的日期</small>
               <div class="custom-date-actions">
@@ -741,12 +741,12 @@
     const end = document.getElementById("customEnd");
     const hint = document.getElementById("customDateHint");
     if (!start || !end || !hint) return;
-    start.min = min;
-    start.max = max;
-    end.min = min;
-    end.max = max;
-    start.value = state.customStart || dates[Math.max(0, dates.length - 7)] || "";
-    end.value = state.customEnd || max;
+    const options = dates.map((date) => `<option value="${date}">${readableDate(date)}</option>`).join("");
+    start.innerHTML = options || '<option value="">暂无日期</option>';
+    end.innerHTML = options || '<option value="">暂无日期</option>';
+    const defaultStart = dates[Math.max(0, dates.length - 7)] || "";
+    start.value = dates.includes(state.customStart) ? state.customStart : defaultStart;
+    end.value = dates.includes(state.customEnd) ? state.customEnd : max;
     hint.textContent = min && max ? `当前已记录 ${min} 至 ${max}` : "当前暂无可选历史数据";
   }
 
