@@ -205,12 +205,31 @@
     try {
       const cached = await vaultGet(CACHE_RECORD);
       if (!cached?.iv || !cached?.ciphertext) return null;
-      const plaintext = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: bytesFromBase64(cached.iv) },
-        state.key,
-        bytesFromBase64(cached.ciphertext),
-      );
-      return JSON.parse(new TextDecoder().decode(plaintext));
+      const keys = [state.key];
+      if (state.config?.cacheMigrationKey) {
+        keys.push(await crypto.subtle.importKey(
+          "raw",
+          bytesFromBase64(state.config.cacheMigrationKey),
+          { name: "AES-GCM" },
+          false,
+          ["decrypt"],
+        ));
+      }
+      for (const key of keys) {
+        try {
+          const plaintext = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: bytesFromBase64(cached.iv) },
+            key,
+            bytesFromBase64(cached.ciphertext),
+          );
+          const data = JSON.parse(new TextDecoder().decode(plaintext));
+          if (key !== state.key) await saveEncryptedCache(data);
+          return data;
+        } catch {
+          // Try the one-time legacy cache key after a password rotation.
+        }
+      }
+      return null;
     } catch {
       return null;
     }
